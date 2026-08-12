@@ -1,0 +1,46 @@
+[project]
+name = "forger"
+version = "0.1.0"
+description = "A Python application compiler, analyzer, bundler, and cross-platform executable builder."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Forger Team" }]
+dependencies = [
+  "click>=8.1.7",
+]
+
+[project.scripts]
+forger = "forger.cli.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+module-name = "forger._core"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["forger/tests"]
+addopts = "--strict-markers --strict-config"
+filterwarnings = [
+  "error",
+]
+
+[tool.pyrefly]
+include = ["forger/"]
+exclude = ["forger/tests/"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C90"]

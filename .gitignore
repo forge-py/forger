@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.egg-info/
+dist/
+*.egg
+.eggs/
+.mypy_cache/
+.pyrefly/
+
+# Virtual environment
+.venv/
+venv/
+
+# Rust
+target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Forger output
+*.forge
+.forge-build/
+
+# Logs
+*.log
+
+# Settings (local)
+.claude/settings.local.json
