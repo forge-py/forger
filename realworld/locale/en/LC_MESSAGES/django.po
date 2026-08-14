@@ -1,0 +1,10 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: myblog\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Latest Posts"
+msgstr "Latest Posts"
+
+msgid "No posts yet."
+msgstr "No posts yet."

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}My Blog{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="/" class="logo">My Blog</a>
+            <a href="/">Home</a>
+            <a href="/categories/">Categories</a>
+            <a href="/search/">Search</a>
+            {% if user.is_authenticated %}
+                <span class="user-greeting">{{ user.username }}</span>
+                <a href="/accounts/profile/">Profile</a>
+                <a href="/accounts/logout/">Logout</a>
+            {% else %}
+                <a href="/accounts/register/">Register</a>
+            {% endif %}
+        </nav>
+    </header>
+    <main>
+        {% if messages %}
+        <section class="messages">
+            {% for message in messages %}
+            <div class="message {{ message.tags }}">{{ message }}</div>
+            {% endfor %}
+        </section>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+    <footer>
+        <p>&copy; 2025 My Blog. Built with Django.</p>
+    </footer>
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

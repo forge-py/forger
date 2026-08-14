@@ -2,11 +2,73 @@
 
 This module provides the build-time API that projects use in their forger.py
 to declare dependencies that cannot be inferred automatically.
+
+Two styles are supported:
+
+1. **Declarative** (Vite-style ``defineConfig``):
+   ```python
+   from forger import defineConfig
+
+   forger_config = defineConfig({
+       "entry": "manage.py",
+       "include": ["templates/**/*", "static/**/*"],
+       "exclude": ["**/__pycache__"],
+       "optimizers": {"django": {"settings_module": "myblog.settings"}},
+       "targets": ["linux-x64", "windows-x64"],
+   })
+   ```
+
+2. **Imperative** (legacy ``include`` / ``include_module``):
+   ```python
+   from forger import include, include_module, metadata
+
+   include("templates/**/*")
+   include_module("myapp.plugins.auth")
+   metadata(entry_point="manage.py")
+   ```
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class OptimizerConfig:
+    """Configuration for a single framework optimizer."""
+
+    name: str
+    options: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ForgerConfig:
+    """Top-level build configuration (Vite-style defineConfig).
+
+    Attributes:
+        entry: Entry-point module or script (e.g. ``"manage.py"``).
+        project: Project name (for diagnostics).
+        include: Glob patterns for files/directories to bundle.
+        exclude: Glob patterns for files/directories to skip.
+        optimizers: Framework optimizer configurations.
+        targets: Target platforms to build for.
+        metadata: Arbitrary key-value metadata.
+    """
+
+    entry: str = ""
+    project: str = ""
+    include: list[str] = field(default_factory=list)
+    exclude: list[str] = field(default_factory=list)
+    optimizers: dict[str, Any] = field(default_factory=dict)
+    targets: list[str] = field(default_factory=list)
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Internal build context (populated by forger.py at compile time)
+# ---------------------------------------------------------------------------
 
 
 class _ForgerContext:
@@ -18,6 +80,7 @@ class _ForgerContext:
         self._included_modules: list[str] = []
         self._included_resources: list[Path] = []
         self._metadata: dict[str, str] = {}
+        self._config: ForgerConfig | None = None
 
     def add_path(self, path: Path) -> None:
         self._included_paths.append(path.resolve())
@@ -54,6 +117,13 @@ class _ForgerContext:
     def metadata(self) -> dict[str, str]:
         return dict(self._metadata)
 
+    @property
+    def config(self) -> ForgerConfig | None:
+        return self._config
+
+    def set_config(self, cfg: ForgerConfig) -> None:
+        self._config = cfg
+
 
 # Global context instance — populated by forger.py during build.
 _context: _ForgerContext | None = None
@@ -66,11 +136,84 @@ def _get_context() -> _ForgerContext:
     return _context
 
 
+# ---------------------------------------------------------------------------
+# Declarative API (Vite-style)
+# ---------------------------------------------------------------------------
+
+
+def defineConfig(  # noqa: N802
+    config: dict[str, Any] | ForgerConfig,
+) -> ForgerConfig:
+    """Define a Forger build configuration (Vite-style).
+
+    Accepts either a ``ForgerConfig`` instance or a plain dict that will be
+    used to construct one.  The returned config is stored in the global
+    forger context so the compiler can read it at build time.
+
+    Args:
+        config: A ``ForgerConfig`` or dict with keys matching
+            ``ForgerConfig`` fields.
+
+    Returns:
+        The resolved ``ForgerConfig``.
+
+    Example:
+        ```python
+        from forger import defineConfig
+
+        forger_config = defineConfig({
+            "entry": "manage.py",
+            "project": "myblog",
+            "include": [
+                "templates/**/*",
+                "static/**/*",
+                "locale/**/*",
+            ],
+            "exclude": [
+                "**/__pycache__",
+                "*.pyc",
+                "*.sqlite3",
+            ],
+            "optimizers": {
+                "django": {
+                    "settings_module": "myblog.settings",
+                },
+            },
+            "targets": ["linux-x64", "windows-x64"],
+        })
+        ```
+    """
+    if isinstance(config, ForgerConfig):
+        cfg = config
+    else:
+        cfg = ForgerConfig(
+            entry=config.get("entry", ""),
+            project=config.get("project", ""),
+            include=config.get("include", []),
+            exclude=config.get("exclude", []),
+            optimizers=config.get("optimizers", {}),
+            targets=config.get("targets", []),
+            metadata={
+                k: str(v)
+                for k, v in config.get("metadata", {}).items()
+            },
+        )
+
+    _get_context().set_config(cfg)
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# Imperative API (legacy)
+# ---------------------------------------------------------------------------
+
+
 def include(pattern: str | Path, *, recursive: bool = True) -> None:
     """Include files matching a glob pattern or a single path.
 
     Args:
-        pattern: Glob pattern (e.g., ``"templates/**/*"``) or a single file/directory path.
+        pattern: Glob pattern (e.g., ``"templates/**/*"``) or a single
+            file/directory path.
         recursive: Whether to recurse into subdirectories (default ``True``).
 
     Example:
@@ -102,7 +245,8 @@ def include_module(module_name: str) -> None:
     """Include a specific Python module by fully qualified name.
 
     Args:
-        module_name: Fully qualified module name (e.g., ``"app.plugins.my_plugin"``).
+        module_name: Fully qualified module name
+            (e.g., ``"app.plugins.my_plugin"``).
 
     Example:
         ```python
