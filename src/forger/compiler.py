@@ -274,19 +274,62 @@ class VenvPackageResolver:
     def _build_module_map(
         self, site_packages: Path
     ) -> dict[str, Path]:
-        """Build a mapping of top-level module name -> package directory."""
+        """Build a mapping of top-level module name -> package directory.
+
+        Reads top_level.txt where available, falling back to RECORD and
+        METADATA when top_level.txt is absent (common with uv-installed
+        packages that omit it).
+        """
         module_map: dict[str, Path] = {}
         for dist_info in site_packages.glob("*.dist-info"):
             tl_file = dist_info / "top_level.txt"
-            if not tl_file.exists():
-                continue
-            try:
-                for line in tl_file.read_text().splitlines():
-                    m = line.strip()
-                    if m and (site_packages / m).is_dir():
-                        module_map[m] = site_packages / m
-            except Exception:
-                pass
+            if tl_file.exists():
+                try:
+                    for line in tl_file.read_text().splitlines():
+                        m = line.strip()
+                        if m and (site_packages / m).is_dir():
+                            module_map[m] = site_packages / m
+                    continue  # top_level.txt present — no fallback needed
+                except Exception:
+                    pass  # fall through to RECORD fallback
+
+            # Fallback 1: parse RECORD for installed file paths
+            record_file = dist_info / "RECORD"
+            if record_file.exists():
+                try:
+                    top_levels: set[str] = set()
+                    for line in record_file.read_text().splitlines():
+                        path_part = line.split(",")[0]
+                        # Skip dist-info entries, scripts, and non-package files
+                        if ".dist-info/" in path_part:
+                            continue
+                        if path_part.startswith("../../"):
+                            continue  # scripts/symlinks
+                        first_segment = path_part.split("/")[0]
+                        if (site_packages / first_segment).is_dir():
+                            top_levels.add(first_segment)
+                    for m in top_levels:
+                        if m not in module_map:
+                            module_map[m] = site_packages / m
+                    continue
+                except Exception:
+                    pass  # fall through to METADATA fallback
+
+            # Fallback 2: parse METADATA Name field and assume the module
+            # name matches the distribution name (true for most packages)
+            meta_file = dist_info / "METADATA"
+            if meta_file.exists():
+                try:
+                    for line in meta_file.read_text().splitlines():
+                        if line.lower().startswith("name:"):
+                            name = line.split(":", 1)[1].strip()
+                            if name and (site_packages / name).is_dir():
+                                if name not in module_map:
+                                    module_map[name] = site_packages / name
+                            break
+                except Exception:
+                    pass
+
         return module_map
 
     def _find_transitive_dirs(
