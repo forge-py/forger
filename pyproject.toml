@@ -5,18 +5,11 @@ description = "A Python application compiler, analyzer, bundler, and cross-platf
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Forger Team" }]
-dependencies = [
-  "click>=8.1.7",
-]
+dependencies = ["click>=8.1.7"]
 
 [project.scripts]
 forger = "forger.cli.__main__:run"
 
-[project.optional-dependencies]
-dev = [
-  "pytest>=8.0",
-  "pytest-asyncio>=0.24",
-]
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
@@ -30,9 +23,7 @@ module-name = "forger"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
-filterwarnings = [
-  "error",
-]
+filterwarnings = ["error"]
 
 [tool.pyrefly]
 include = ["src/forger/"]
@@ -44,3 +35,8 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C90"]
+
+[dependency-groups]
+lint = ["ruff>=0.16.3"]
+typing = ["pyrefly>=1.2.0"]
+test = ["pytest>=8.0", "pytest-asyncio>=0.24"]
