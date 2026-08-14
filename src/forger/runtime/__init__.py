@@ -42,9 +42,7 @@ def bootstrap(entry_point: str, vfs_root: Path | None = None) -> None:
             logger.info("Calling main() in %s", entry_point)
             module.main()
         else:
-            logger.info(
-                "Module %s has no main() — execution complete", entry_point
-            )
+            logger.info("Module %s has no main() — execution complete", entry_point)
 
     except ImportError as e:
         logger.error("Failed to import entry point %s: %s", entry_point, e)

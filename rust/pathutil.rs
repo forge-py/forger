@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 /// - Returns the normalized path as a String
 pub fn normalize_path(path: &Path) -> String {
     let lossy = path.to_string_lossy();
-    let mut result = String::new();
+    let  result;
 
     // Split on both forward and back slashes
     let parts: Vec<&str> = lossy.split(|c| c == '/' || c == '\\').collect();

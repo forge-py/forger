@@ -7,8 +7,11 @@
 //! - Hashing, caching, and incremental build detection
 //! - `.forge` artifact serialization/deserialization
 //! - Parallel processing orchestration
+//! - CLI argument parsing (clap)
+//! - PyO3 bindings for Python integration
 
 pub mod cache;
+pub mod cli;
 pub mod depgraph;
 pub mod filesystem;
 pub mod forge;
@@ -28,3 +31,19 @@ pub use module::{ModuleResolver, ModuleSpec};
 pub use pathutil::{normalize_path, normalize_path_buf, PathSet};
 pub use result::{ForgerError, ForgerResult};
 pub use vfs::{VirtualFileSystem, VfsNode, VfsEntry};
+
+// PyO3 Python module binding
+// Exposed as `forger._core` when built via maturin.
+use pyo3::prelude::*;
+
+/// Hash a byte slice using BLAKE3 and return the hex string.
+#[pyfunction]
+fn content_hash_bytes_py(data: &[u8]) -> PyResult<String> {
+    Ok(hash::content_hash_bytes(data).0)
+}
+
+#[pymodule]
+fn forger(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction_bound!(content_hash_bytes_py)(m).unwrap())?;
+    Ok(())
+}

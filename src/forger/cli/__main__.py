@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 @click.group()  # type: ignore[name-defined]
-@click.version_option(package_name="forger")  # type: ignore[name-defined]
+@click.version_option(version="0.1.0")  # type: ignore[name-defined]
 def main() -> None:
     """Forger — Python application compiler and bundler."""
     pass
@@ -50,9 +50,9 @@ def compile(  # type: ignore[name-defined]
 ) -> None:
     """Analyze and compile a Python project into a .forge artifact."""
     if verbose:
-        logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
+        logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, force=True)
     else:
-        logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
 
     logger.info("Forger compile: %s -> %s", source, output)
     logger.info("Entry point: %s", entry_point)
@@ -115,9 +115,9 @@ def build(  # type: ignore[name-defined]
 ) -> None:
     """Build a platform-specific executable from a .forge artifact."""
     if verbose:
-        logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
+        logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, force=True)
     else:
-        logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
 
     logger.info("Forger build: %s -> %s", artifact, target)
 

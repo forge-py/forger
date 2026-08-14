@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import ast
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -56,9 +56,7 @@ class ResourceAnalyzer:
     def accesses(self) -> list[ResourceAccess]:
         return list(self._accesses)
 
-    def analyze_source(
-        self, source: str, filename: str = "<string>"
-    ) -> list[ResourceAccess]:
+    def analyze_source(self, source: str, filename: str = "<string>") -> list[ResourceAccess]:
         """Analyze Python source code string for resource access."""
         self._accesses.clear()
 
@@ -130,9 +128,7 @@ class ResourceAnalyzer:
                 return f"{value_name}.{node.attr}"
         return None
 
-    def _extract_path_arg(
-        self, node: ast.Call
-    ) -> tuple[str | None, bool]:
+    def _extract_path_arg(self, node: ast.Call) -> tuple[str | None, bool]:
         """Extract the path argument from a function call.
 
         Returns (path_string, is_dynamic).

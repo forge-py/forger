@@ -69,9 +69,7 @@ class DjangoOptimizer(Optimizer):
 
         return min(score, 1.0)
 
-    def analyze(
-        self, context: OptimizerContext, graph: DependencyGraph
-    ) -> None:
+    def analyze(self, context: OptimizerContext, graph: DependencyGraph) -> None:
         """Analyze Django project configuration."""
         from forger.core import (  # noqa: E402
             DependencyEdge,
@@ -96,9 +94,9 @@ class DjangoOptimizer(Optimizer):
 
         # Add settings.py
         graph.add_node(
-            DependencyNode.new(
-                str(settings_path), NodeType.Configuration
-            ).with_metadata("discovered_by", "django_optimizer")
+            DependencyNode.new(str(settings_path), NodeType.Configuration).with_metadata(
+                "discovered_by", "django_optimizer"
+            )
         )
 
         # Try to extract configuration by importing settings
@@ -118,9 +116,7 @@ class DjangoOptimizer(Optimizer):
         for static_dir in static_dirs:
             self._add_resource_directory(static_dir, "django_static", graph)
 
-    def _find_settings(
-        self, project_root: Path
-    ) -> Path | None:
+    def _find_settings(self, project_root: Path) -> Path | None:
         """Find settings.py in the project."""
         # Direct settings.py
         if (project_root / "settings.py").exists():
@@ -160,9 +156,7 @@ class DjangoOptimizer(Optimizer):
                 sys.path.insert(0, str(project_root))
 
             # Try to import the settings module
-            spec = importlib_util.spec_from_file_location(
-                "settings", settings_path
-            )
+            spec = importlib_util.spec_from_file_location("settings", settings_path)
             if spec and spec.loader:
                 settings_module = importlib_util.module_from_spec(spec)
                 spec.loader.exec_module(settings_module)
@@ -251,13 +245,9 @@ class DjangoOptimizer(Optimizer):
         for resource_dir in resource_dirs:
             dir_path = app_path / resource_dir
             if dir_path.exists() and dir_path.is_dir():
-                self._add_resource_directory(
-                    dir_path, f"django_app_{resource_dir}", graph
-                )
+                self._add_resource_directory(dir_path, f"django_app_{resource_dir}", graph)
 
-    def _find_app_path(
-        self, app_name: str, project_root: Path
-    ) -> Path | None:
+    def _find_app_path(self, app_name: str, project_root: Path) -> Path | None:
         """Find the filesystem path for a Django app."""
         # Convert dotted name to path
         parts = app_name.split(".")
@@ -291,7 +281,7 @@ class DjangoOptimizer(Optimizer):
             if file_path.is_file():
                 node_id = str(file_path.relative_to(dir_path.parent))
                 graph.add_node(
-                    DependencyNode.new(
-                        node_id, NodeType.Resource
-                    ).with_metadata("discovered_by", f"django_optimizer:{label}")
+                    DependencyNode.new(node_id, NodeType.Resource).with_metadata(
+                        "discovered_by", f"django_optimizer:{label}"
+                    )
                 )

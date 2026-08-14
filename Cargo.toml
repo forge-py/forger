@@ -6,11 +6,14 @@ rust-version = "1.70"
 
 [lib]
 name = "forger_core"
-path = "forger/core/src/lib.rs"
+path = "rust/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "forger"
+path = "rust/main.rs"
+
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module", "abi3-py310"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 blake3 = "1.5"
@@ -25,6 +28,10 @@ bitflags = "2.5"
 thiserror = "1.0"
 regex = "1.10"
 glob = "0.3"
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+
+# PyO3 for Python extension module (maturin)
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py310"] }
 
 [dev-dependencies]
 tempfile = "3.10"
