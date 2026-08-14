@@ -1,5 +1,5 @@
 [project]
-name = "forger"
+name = "forger-py"
 version = "0.0.0"
 description = "A Python application compiler, analyzer, bundler, and cross-platform executable builder."
 requires-python = ">=3.10"
