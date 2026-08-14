@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from forger.core import DependencyGraph  # type: ignore[attr-defined]
-    from forger.optimizer import OptimizerContext  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 
@@ -428,8 +427,7 @@ class Compiler:
     1. File discovery (Rust core)
     2. Static analysis (Python AST)
     3. forger.py processing
-    4. Framework optimizer execution
-    5. Dependency graph resolution
+    4. Dependency graph resolution
     6. Artifact generation
     """
 
@@ -445,7 +443,7 @@ class Compiler:
         self._vfs_path: Path = output_path.resolve()
         self.graph: DependencyGraph | None = None  # type: ignore[name-defined]
         self.source_files: list[Path] = []
-        self._optimizer_context: OptimizerContext | None = None
+        self._plugin_context: object = None
 
     @classmethod
     def forge_from_vfs(
@@ -602,26 +600,22 @@ class Compiler:
         else:
             logger.info("forger.py contributed no config")
 
-    def run_optimizers(self) -> None:
-        """Run framework optimizers."""
+    def run_plugins(self, plugins=None) -> None:
+        """Run framework plugins."""
         if not self.graph:
             return
 
-        from forger.optimizer import OptimizerContext, run_optimizers
+        if plugins:
+            from forger.optimizer import PluginContext, PluginRunner
 
-        # Build optimizer context
-        context = OptimizerContext(
-            project_root=self.project_root,
-            source_files=self.source_files,
-            installed_packages=self._discover_installed_packages(),
-        )
-        self._optimizer_context = context
+            plugin_ctx = PluginContext(project_root=self.project_root)
+            plugin_ctx.set_graph(self.graph)
+            self._plugin_context = plugin_ctx
 
-        active = run_optimizers(context, self.graph)
-        if active:
-            logger.info("Active optimizers: %s", ", ".join(active))
-        else:
-            logger.info("No framework optimizers activated")
+            runner = PluginRunner(plugins)
+            runner.run_build_graph(plugin_ctx)
+            runner.run_build_graph(plugin_ctx)
+            logger.info("Ran %d plugins", len(plugins))
 
     def generate_vfs(self) -> None:
         """Generate the VFS directory from analysis results.

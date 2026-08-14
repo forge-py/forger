@@ -179,16 +179,6 @@ def test_dependency_graph_merge() -> None:
     assert graph1.get_node("b") is not None
 
 
-def test_optimizer_framework() -> None:
-    """Test optimizer discovery."""
-    from forger.optimizer import discover_optimizers
-
-    optimizers = discover_optimizers()
-    # Should find at least Django and Flask optimizers
-    names = {opt.name for opt in optimizers}
-    assert "django" in names or len(optimizers) > 0
-
-
 def test_forger_api() -> None:
     """Test the forger.py API."""
     # Clear context

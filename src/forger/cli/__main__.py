@@ -114,8 +114,8 @@ def compile(  # noqa: A001  # type: ignore[name-defined]
             shutil.rmtree(output_dir)
             logger.info("Cleaned dist directory: %s", output_dir)
 
-        # Run optimizers
-        compiler.run_optimizers()
+        # Run plugins (framework-specific discovery)
+        compiler.run_plugins()
 
         # Generate VFS directory (includes venv package copying)
         compiler.generate_vfs()

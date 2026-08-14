@@ -19,17 +19,17 @@ forger_config = defineConfig({
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, NotRequired, TypedDict
+from typing import Any, TypedDict
 
 
 class OptimizerOptions(TypedDict, total=False):
     """Typed options passed to a framework optimizer."""
 
-    settings_module: NotRequired[str]
-    root_urlconf: NotRequired[str]
-    templates_dir: NotRequired[str]
-    static_dir: NotRequired[str]
-    extra: NotRequired[dict[str, Any]]
+    settings_module: str
+    root_urlconf: str
+    templates_dir: str
+    static_dir: str
+    extra: dict[str, Any]
 
 
 class ForgerConfigDict(TypedDict, total=False):
@@ -39,14 +39,14 @@ class ForgerConfigDict(TypedDict, total=False):
     ``ForgerConfig``.
     """
 
-    entry: NotRequired[str]
-    project: NotRequired[str]
-    include: NotRequired[list[str]]
-    exclude: NotRequired[list[str]]
-    optimizers: NotRequired[dict[str, OptimizerOptions]]
-    targets: NotRequired[list[str]]
-    metadata: NotRequired[dict[str, str | int]]
-    dist_dir: NotRequired[str]
+    entry: str
+    project: str
+    include: list[str]
+    exclude: list[str]
+    optimizers: dict[str, OptimizerOptions]
+    targets: list[str]
+    metadata: dict[str, str | int]
+    dist_dir: str
 
 
 @dataclass

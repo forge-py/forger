@@ -1,15 +1,14 @@
-"""Optimizer / plugin framework for the Forger compiler.
+"""Plugin framework for the Forger compiler.
 
 Provides:
-- Optimizer base class (legacy compatibility)
 - Plugin system (Vite-style lifecycle hooks)
 - Plugin context for controlled graph access
+- PluginRunner for executing lifecycle hooks
 """
 
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -23,55 +22,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# OptimizerContext (legacy)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class OptimizerContext:
-    """Context passed to optimizers."""
-
-    project_root: Path
-    source_files: list[Path] = field(default_factory=list)
-    installed_packages: dict[str, str] = field(default_factory=dict)
-    graph: DependencyGraph | None = None
-    config: dict = field(default_factory=dict)
-
-    def has_package(self, name: str) -> bool:
-        """Check if a package is installed in the project environment."""
-        if name in self.installed_packages:
-            return True
-        import importlib.metadata
-
-        try:
-            importlib.metadata.distribution(name)
-            return True
-        except importlib.metadata.PackageNotFoundError:
-            return False
-
-
-# ---------------------------------------------------------------------------
-# Optimizer (legacy base class)
-# ---------------------------------------------------------------------------
-
-
-class Optimizer(ABC):
-    """Base class for framework-specific optimizers.
-
-    Legacy interface — new code should use the Plugin protocol instead.
-    """
-
-    name: str = "optimizer"
-
-    @abstractmethod
-    def detect(self, context: OptimizerContext) -> float:
-        """Return confidence score (0.0–1.0) that this optimizer applies."""
-
-    def analyze(self, context: OptimizerContext, graph: DependencyGraph) -> None:
-        """Analyze and contribute to the dependency graph."""
 
 
 # ---------------------------------------------------------------------------
@@ -393,95 +343,13 @@ class PluginRunner:
 
 
 # ---------------------------------------------------------------------------
-# Optimizer discovery
+# Optimizer discovery (removed)
 # ---------------------------------------------------------------------------
-
-
-def discover_optimizers() -> list[Optimizer]:
-    """Discover all available optimizers.
-
-    Scans the ``forger.optimizers`` package for subclasses of ``Optimizer``
-    and returns them.
-
-    Returns:
-        List of optimizer instances.
-    """
-    import importlib
-
-    optimizers: list[Optimizer] = []
-    try:
-        optimizers_module = importlib.import_module("forger.optimizers")
-    except ImportError:
-        return optimizers
-
-    # Discover optimizer modules via entry points or by scanning submodules
-    for submodule_name in dir(optimizers_module):
-        if submodule_name.startswith("_"):
-            continue
-        submodule = getattr(optimizers_module, submodule_name, None)
-        if submodule is None:
-            continue
-
-        # Try to import the submodule to find Optimizer subclasses
-        try:
-            submodule_obj = importlib.import_module(f"forger.optimizers.{submodule_name}")
-        except ImportError:
-            continue
-
-        for attr_name in dir(submodule_obj):
-            attr = getattr(submodule_obj, attr_name, None)
-            if (
-                attr is not None
-                and isinstance(attr, type)
-                and issubclass(attr, Optimizer)
-                and attr is not Optimizer
-            ):
-                optimizers.append(attr())
-
-    return optimizers
-
-
-def run_optimizers(
-    context: OptimizerContext,
-    graph: DependencyGraph,
-) -> list[str]:
-    """Run all detected optimizers on the dependency graph.
-
-    Discovers optimizers, runs detection, and executes those with
-    a confidence score >= 0.5.
-
-    Args:
-        context: The optimizer context.
-        graph: The dependency graph to contribute to.
-
-    Returns:
-        List of active optimizer names.
-    """
-    all_optimizers = discover_optimizers()
-    active: list[str] = []
-
-    for optimizer in all_optimizers:
-        try:
-            confidence = optimizer.detect(context)
-            if confidence >= 0.5:
-                logger.info(
-                    "Optimizer %s activated (confidence: %.2f)",
-                    optimizer.name,
-                    confidence,
-                )
-                optimizer.analyze(context, graph)
-                active.append(optimizer.name)
-            else:
-                logger.debug(
-                    "Optimizer %s not activated (confidence: %.2f)",
-                    optimizer.name,
-                    confidence,
-                )
-        except Exception as e:
-            logger.warning(
-                "Optimizer %s failed: %s",
-                optimizer.name,
-                e,
-            )
-
-    return active
+#
+# Framework-specific optimizers (Django, Flask, etc.) have been moved to
+# external plugins:
+#
+#     forge-plugin-django  — https://github.com/forge-py/forge-django-plugin
+#     forge-plugin-flask   — https://github.com/forge-py/forge-plugin-flask
+#
+# The Plugin protocol and PluginRunner remain for extensibility.

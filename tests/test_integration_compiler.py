@@ -432,7 +432,7 @@ def test_optimizer_runs_on_django_project() -> None:
         output = root / "app.forge"
         compiler = Compiler(root, "main", output)
         compiler.analyze()
-        compiler.run_optimizers()
+        compiler.run_plugins()
 
         # Graph should have nodes from both analysis and optimizer
         assert compiler.graph is not None
@@ -460,7 +460,7 @@ def test_compiler_full_pipeline() -> None:
         # Full pipeline: analyze → VFS
         compiler.analyze()
         compiler.process_forger_py(root / "forger.py")
-        compiler.run_optimizers()
+        compiler.run_plugins()
         compiler.generate_vfs()
 
         # Verify VFS was created

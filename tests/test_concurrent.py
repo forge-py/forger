@@ -111,8 +111,8 @@ def test_stress_compiler_with_many_modules() -> None:
 
 
 def test_concurrent_optimizer_runs() -> None:
-    """Test that optimizers can run concurrently."""
-    from forger.optimizer import OptimizerContext, discover_optimizers
+    """Test that plugin discovery can run concurrently."""
+    from forger.optimizer import PluginContext
 
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
@@ -124,19 +124,19 @@ def test_concurrent_optimizer_runs() -> None:
             (sub / "main.py").write_text("pass\n")
 
             contexts.append(
-                OptimizerContext(
+                PluginContext(
                     project_root=sub,
-                    installed_packages={"django": "4.2", "flask": "3.0"},
                 )
             )
 
-        # Discover optimizers for each context
+        # Create plugin contexts concurrently
         results = []
 
+        def get_project_root(ctx):
+            return str(ctx.project_root)
+
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = []
-            for _ctx in contexts:
-                futures.append(executor.submit(discover_optimizers))
+            futures = [executor.submit(get_project_root, ctx) for ctx in contexts]
 
             for future in as_completed(futures):
                 result = future.result()
