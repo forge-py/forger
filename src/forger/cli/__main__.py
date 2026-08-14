@@ -60,8 +60,8 @@ def compile(  # noqa: A001  # type: ignore[name-defined]
     else:
         logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
 
-    logger.info("Forger compile: %s -> %s", source, output)
-    logger.info("Entry point: %s", entry_point)
+    print(f"Forger compile: {source} -> {output}")
+    print(f"Entry point: {entry_point}")
 
     project_root = Path(source).resolve()
     # Resolve output relative to the source directory, not CWD
@@ -120,8 +120,8 @@ def compile(  # noqa: A001  # type: ignore[name-defined]
         # Generate VFS directory (includes venv package copying)
         compiler.generate_vfs()
 
-        logger.info("Compilation complete: %s", output_dir)
-        logger.info(compiler.diagnostic_summary())
+        print(f"Compilation complete: {output_dir}")
+        print(compiler.diagnostic_summary())
 
     except Exception as e:
         logger.error("Compilation failed: %s", e, exc_info=True)
