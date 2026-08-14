@@ -557,6 +557,12 @@ class Compiler:
         import forger.api as api_module
 
         api_module._context = None  # noqa: SLF001
+        ctx = api_module._get_context()
+
+        # Expose the dependency graph to forger.py so plugins can
+        # inspect and manipulate it directly
+        if self.graph is not None:
+            ctx.set_graph(self.graph)
 
         # Execute forger.py in isolated context
         try:
@@ -760,12 +766,14 @@ class Compiler:
         copied = 0
         for pattern in cfg.include:
             for file_path in self.project_root.rglob("*"):
-                if file_path.is_file() and fnmatch.fnmatch(str(file_path), pattern):
-                    try:
-                        rel_path = file_path.relative_to(self.project_root)
-                    except ValueError:
-                        continue
+                if not file_path.is_file():
+                    continue
+                try:
+                    rel_path = file_path.relative_to(self.project_root)
+                except ValueError:
+                    continue
 
+                if fnmatch.fnmatch(str(rel_path), pattern):
                     dest = self.output_path / rel_path
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     if not dest.exists():

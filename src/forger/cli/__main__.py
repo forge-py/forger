@@ -81,7 +81,10 @@ def compile(  # noqa: A001  # type: ignore[name-defined]
             output_path=output_dir,
         )
 
-        # Process forger.py if present
+        # Run analysis (creates the dependency graph)
+        compiler.analyze()
+
+        # Process forger.py if present — graph is now available for plugins
         if forger_py:
             compiler.process_forger_py(Path(forger_py).resolve())
         else:
@@ -110,9 +113,6 @@ def compile(  # noqa: A001  # type: ignore[name-defined]
         if output_dir.exists():
             shutil.rmtree(output_dir)
             logger.info("Cleaned dist directory: %s", output_dir)
-
-        # Run analysis
-        compiler.analyze()
 
         # Run optimizers
         compiler.run_optimizers()

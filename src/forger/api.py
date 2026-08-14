@@ -84,6 +84,7 @@ class _ForgerContext:
 
     def __init__(self) -> None:
         self._config: ForgerConfig | None = None
+        self._graph: Any = None
 
     @property
     def config(self) -> ForgerConfig | None:
@@ -91,6 +92,19 @@ class _ForgerContext:
 
     def set_config(self, cfg: ForgerConfig) -> None:
         self._config = cfg
+
+    @property
+    def graph(self) -> Any:
+        """The dependency graph being built.
+
+        Exposed so that ``forger.py`` can inspect and manipulate the
+        graph directly — adding nodes, edges, or marking modules as
+        required.
+        """
+        return self._graph
+
+    def set_graph(self, graph: Any) -> None:
+        self._graph = graph
 
 
 # Global context instance — populated by forger.py during build.
@@ -172,3 +186,75 @@ def defineConfig(  # noqa: N802
 def get_context() -> _ForgerContext:
     """Get the current forger build context (for advanced usage)."""
     return _get_context()
+
+
+# ---------------------------------------------------------------------------
+# Plugin API — helpers for forger.py to manipulate the dependency graph
+# ---------------------------------------------------------------------------
+
+
+def include(pattern: str) -> None:
+    """Declare a glob pattern of files to include in the build.
+
+    The pattern is matched against relative paths from the project root.
+
+    Example:
+        ```python
+        from forger import include
+
+        include("templates/**/*")
+        include("static/**/*")
+        ```
+    """
+    cfg = _get_context().config
+    if cfg is not None:
+        cfg.include.append(pattern)
+
+
+def include_module(module_id: str) -> None:
+    """Explicitly include a Python module in the dependency graph.
+
+    Adds a node to the graph and marks it as required.
+
+    Example:
+        ```python
+        from forger import include_module
+
+        include_module("myapp.plugins.foo")
+        ```
+    """
+    graph = _get_context().graph
+    if graph is None:
+        return
+    from forger.core import DependencyNode, NodeType
+
+    node = graph.get_node(module_id)
+    if node is None:
+        graph.add_node(DependencyNode.new(module_id, NodeType.PythonModule))
+        node = graph.get_node(module_id)
+    if node is not None:
+        node.required = True
+
+
+def include_resource(path: str) -> None:
+    """Explicitly include a resource file in the build.
+
+    Adds a resource node to the dependency graph.
+
+    Example:
+        ```python
+        from forger import include_resource
+
+        include_resource("data/schema.json")
+        ```
+    """
+    graph = _get_context().graph
+    if graph is None:
+        return
+    from forger.core import DependencyNode, NodeType
+
+    graph.add_node(
+        DependencyNode.new(path, NodeType.Resource)
+        .with_metadata("source", "forger.py")
+        .with_metadata("included_by", "include_resource")
+    )
