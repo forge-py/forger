@@ -124,15 +124,7 @@ class ModuleGraphPruner:
 
     def _get_dependencies(self, module_id: str) -> list[str]:
         """Get all dependencies of a module from the graph."""
-        deps: list[str] = []
-        try:
-            edges = self.graph.get_outgoing_edges(module_id)
-            for edge in edges:
-                target = edge.to_node if hasattr(edge, "to_node") else str(edge)
-                deps.append(target)
-        except Exception:
-            pass
-        return deps
+        return self.graph.dependencies_of(module_id)
 
     def _all_module_ids(self) -> set[str]:
         """Get all module IDs in the graph."""

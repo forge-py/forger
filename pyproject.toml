@@ -27,8 +27,9 @@ filterwarnings = ["error"]
 pythonpath = ["src"]
 
 [tool.pyrefly]
-include = ["src/forger/", "tests/"]
-exclude = ["src/forger/tests/"]
+project-includes = ["src/forger/", "tests/"]
+project-excludes = ["src/forger/tests/", "realworld/", "forger/tests/"]
+ignore-missing-imports = ["pytest"]
 
 [tool.ruff]
 target-version = "py310"

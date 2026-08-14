@@ -45,7 +45,7 @@ class ForgerConfigDict(TypedDict, total=False):
     exclude: NotRequired[list[str]]
     optimizers: NotRequired[dict[str, OptimizerOptions]]
     targets: NotRequired[list[str]]
-    metadata: NotRequired[dict[str, str]]
+    metadata: NotRequired[dict[str, str | int]]
     dist_dir: NotRequired[str]
 
 

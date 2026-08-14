@@ -162,9 +162,7 @@ class DjangoOptimizer(Optimizer):
     @staticmethod
     def _load_settings_module(settings_path: Path) -> object | None:
         """Load a settings.py module from disk."""
-        spec = importlib_util.spec_from_file_location(
-            "settings", settings_path
-        )
+        spec = importlib_util.spec_from_file_location("settings", settings_path)
         if spec and spec.loader:
             settings_module = importlib_util.module_from_spec(spec)
             spec.loader.exec_module(settings_module)
@@ -242,13 +240,9 @@ class DjangoOptimizer(Optimizer):
         for resource_dir in resource_dirs:
             dir_path = app_path / resource_dir
             if dir_path.exists() and dir_path.is_dir():
-                self._add_resource_directory(
-                    dir_path, f"django_app_{resource_dir}", graph
-                )
+                self._add_resource_directory(dir_path, f"django_app_{resource_dir}", graph)
 
-    def _find_app_path(
-        self, app_name: str, project_root: Path
-    ) -> Path | None:
+    def _find_app_path(self, app_name: str, project_root: Path) -> Path | None:
         """Find the filesystem path for a Django app."""
         parts = app_name.split(".")
         search_path = project_root

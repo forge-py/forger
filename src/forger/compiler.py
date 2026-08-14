@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -603,12 +604,14 @@ class Compiler:
         # Copy reachable Python source files
         copied = 0
         # Check if any source file nodes are marked required
-        any_required = any(
-            self.graph.get_node(self._path_to_module(sf)) is not None
-            and self.graph.get_node(self._path_to_module(sf)).required
-            for sf in self.source_files
-            if self._path_to_module(sf) is not None
-        )
+        any_required = False
+        for sf in self.source_files:
+            mod = self._path_to_module(sf)
+            if mod is not None:
+                node = self.graph.get_node(mod)
+                if node is not None and node.required:
+                    any_required = True
+                    break
 
         for source_file in self.source_files:
             module_name = self._path_to_module(source_file)

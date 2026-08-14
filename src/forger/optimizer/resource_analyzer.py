@@ -75,7 +75,9 @@ class OpenCallResolver(ResourceResolver):
             return True
         return False
 
-    def resolve(self, node: ast.Call, context: dict) -> ResourceRef | None:
+    def resolve(self, node: ast.AST, context: dict) -> ResourceRef | None:
+        if not isinstance(node, ast.Call):
+            return None
         if not node.args:
             return None
         first_arg = node.args[0]
@@ -115,7 +117,9 @@ class PathlibResolver(ResourceResolver):
                 return True
         return False
 
-    def resolve(self, node: ast.Call, context: dict) -> ResourceRef | None:
+    def resolve(self, node: ast.AST, context: dict) -> ResourceRef | None:
+        if not isinstance(node, ast.Call):
+            return None
         func = node.func
         if isinstance(func, ast.Attribute):
             path = _extract_string_value(func.value)

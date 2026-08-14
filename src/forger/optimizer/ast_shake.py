@@ -118,7 +118,11 @@ class _ScopeCollector(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._visit_def_helper(node, "class")
 
-    def _visit_def_helper(self, node: ast.AST, scope: str) -> None:
+    def _visit_def_helper(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
+        scope: str,
+    ) -> None:
         sym = SymbolDef(
             module_id=self.module_id,
             name=node.name,
