@@ -1,6 +1,6 @@
 [project]
 name = "forger"
-version = "0.1.0"
+version = "0.0.0"
 description = "A Python application compiler, analyzer, bundler, and cross-platform executable builder."
 requires-python = ">=3.10"
 license = { text = "MIT" }
