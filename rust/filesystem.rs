@@ -36,7 +36,8 @@ impl FileType {
             Some("pyc") | Some("pyo") => FileType::PythonBytecode,
             Some("pyd") | Some("so") | Some("dylib") => FileType::NativeExtension,
             Some("dll") => FileType::NativeLibrary,
-            Some("toml") | Some("cfg") | Some("ini") | Some("yaml") | Some("yml") | Some("json") | Some("xml") => FileType::Configuration,
+            Some("toml") | Some("cfg") | Some("ini") | Some("yaml") | Some("yml")
+            | Some("json") | Some("xml") => FileType::Configuration,
             Some("md") | Some("rst") | Some("txt") => FileType::Documentation,
             _ => FileType::DataResource,
         }
@@ -161,9 +162,11 @@ impl FileDiscovery {
 
     /// Run sequential discovery (for small directories or when order matters).
     pub fn discover(&self) -> ForgerResult<Vec<FileEntry>> {
-        let root = self.options.root.canonicalize().map_err(|e| {
-            ForgerError::Filesystem(format!("cannot resolve root path: {e}"))
-        })?;
+        let root = self
+            .options
+            .root
+            .canonicalize()
+            .map_err(|e| ForgerError::Filesystem(format!("cannot resolve root path: {e}")))?;
 
         let mut entries = Vec::new();
         let max_depth = self.options.max_depth.unwrap_or(usize::MAX);
@@ -191,9 +194,8 @@ impl FileDiscovery {
         })?;
 
         for entry_result in read_dir {
-            let entry = entry_result.map_err(|e| {
-                ForgerError::Filesystem(format!("directory entry error: {e}"))
-            })?;
+            let entry = entry_result
+                .map_err(|e| ForgerError::Filesystem(format!("directory entry error: {e}")))?;
 
             let path = entry.path();
 
@@ -252,10 +254,7 @@ impl FileDiscovery {
             ForgerError::Filesystem(format!("cannot read metadata for {:?}: {e}", path))
         })?;
 
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(path)
-            .to_path_buf();
+        let relative = path.strip_prefix(root).unwrap_or(path).to_path_buf();
 
         let normalized = normalize_path(path);
         let file_type = FileType::from_path(path);
@@ -394,7 +393,10 @@ mod tests {
 
     #[test]
     fn test_file_type_classification() {
-        assert_eq!(FileType::from_path(Path::new("main.py")), FileType::PythonSource);
+        assert_eq!(
+            FileType::from_path(Path::new("main.py")),
+            FileType::PythonSource
+        );
         assert_eq!(
             FileType::from_path(Path::new("cache.pyc")),
             FileType::PythonBytecode
@@ -431,7 +433,9 @@ mod tests {
         let entries = discovery.discover().unwrap();
 
         assert_eq!(entries.len(), 3);
-        assert!(entries.iter().all(|e| e.file_type == FileType::PythonSource));
+        assert!(entries
+            .iter()
+            .all(|e| e.file_type == FileType::PythonSource));
     }
 
     #[test]
@@ -439,15 +443,21 @@ mod tests {
         let tmp = TempDir::with_prefix("forger-test").unwrap();
         std::fs::write(tmp.path().join("main.py"), "print('hello')").unwrap();
         std::fs::create_dir_all(tmp.path().join("__pycache__")).unwrap();
-        std::fs::write(tmp.path().join("__pycache__").join("main.cpython-310.pyc"), "bytecode")
-            .unwrap();
+        std::fs::write(
+            tmp.path().join("__pycache__").join("main.cpython-310.pyc"),
+            "bytecode",
+        )
+        .unwrap();
 
         let options = DiscoveryOptions::for_python_project(tmp.path());
         let discovery = FileDiscovery::new(options);
         let entries = discovery.discover().unwrap();
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].relative.file_name().unwrap().to_str().unwrap(), "main.py");
+        assert_eq!(
+            entries[0].relative.file_name().unwrap().to_str().unwrap(),
+            "main.py"
+        );
     }
 
     #[test]

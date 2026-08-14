@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-forger = "forger.cli.__main__:main"
+forger = "forger.cli.__main__:run"
 
 [project.optional-dependencies]
 dev = [
@@ -23,20 +23,20 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [tool.maturin]
+python-source = "src"
 manifest-path = "Cargo.toml"
-module-name = "forger._core"
-features = ["pyo3/extension-module"]
+module-name = "forger"
 
 [tool.pytest.ini_options]
-testpaths = ["forger/tests"]
+testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
 filterwarnings = [
   "error",
 ]
 
 [tool.pyrefly]
-include = ["forger/"]
-exclude = ["forger/tests/"]
+include = ["src/forger/"]
+exclude = ["src/forger/tests/"]
 
 [tool.ruff]
 target-version = "py310"

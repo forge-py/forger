@@ -10,7 +10,7 @@ from __future__ import annotations
 import ast
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -37,9 +37,7 @@ class DynamicImportAnalyzer:
     def hints(self) -> list[DynamicImportHint]:
         return list(self._hints)
 
-    def analyze_source(
-        self, source: str, filename: str = "<string>"
-    ) -> list[DynamicImportHint]:
+    def analyze_source(self, source: str, filename: str = "<string>") -> list[DynamicImportHint]:
         """Analyze Python source code string for dynamic import patterns."""
         self._hints.clear()
 
@@ -71,9 +69,7 @@ class DynamicImportAnalyzer:
         self._visit_tree(tree, str(filepath), source)
         return list(self._hints)
 
-    def _visit_tree(
-        self, tree: ast.AST, filename: str, source: str
-    ) -> None:
+    def _visit_tree(self, tree: ast.AST, filename: str, source: str) -> None:
         """Walk the AST looking for dynamic import patterns."""
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
@@ -81,9 +77,7 @@ class DynamicImportAnalyzer:
             elif isinstance(node, ast.Subscript):
                 self._check_sys_modules(node, filename, source)
 
-    def _check_call(
-        self, node: ast.Call, filename: str, source: str
-    ) -> None:
+    def _check_call(self, node: ast.Call, filename: str, source: str) -> None:
         """Check a function call for dynamic import patterns."""
         func_name = self._get_func_name(node.func)
         if not func_name:
@@ -140,9 +134,7 @@ class DynamicImportAnalyzer:
                 )
             )
 
-    def _check_sys_modules(
-        self, node: ast.Subscript, filename: str, source: str
-    ) -> None:
+    def _check_sys_modules(self, node: ast.Subscript, filename: str, source: str) -> None:
         """Check for sys.modules["..."] access."""
         if isinstance(node.value, ast.Subscript):
             outer_name = self._get_name(node.value.value)
@@ -156,9 +148,7 @@ class DynamicImportAnalyzer:
                 and node.value.attr == "modules"
             ):
                 # sys.modules["..."]
-                if isinstance(node.slice, ast.Constant) and isinstance(
-                    node.slice.value, str
-                ):
+                if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
                     self._hints.append(
                         DynamicImportHint(
                             pattern=node.slice.value,
@@ -211,9 +201,7 @@ class DynamicImportAnalyzer:
             return patterns
 
         # Simple regex for entry_points patterns
-        for match in re.finditer(
-            r'entry_points\s*[=:]\s*\{([^}]+)\}', content, re.DOTALL
-        ):
+        for match in re.finditer(r"entry_points\s*[=:]\s*\{([^}]+)\}", content, re.DOTALL):
             block = match.group(1)
             for mod_match in re.finditer(r"['\"](\w+(?:\.\w+)*)['\"]", block):
                 patterns.append(mod_match.group(1))

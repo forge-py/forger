@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # Try to import the compiled Rust extension
 # If not available, fall back to pure Python implementations
 try:
-    from forger import _core
+    from forger import forger_core
 
     HAS_RUST_CORE = True
 except ImportError:
@@ -188,6 +188,11 @@ class DependencyGraph:
         }
 
     def validate(self) -> bool:
+        # Entry points must have corresponding nodes
+        for ep in self._entry_points:
+            if ep not in self._nodes:
+                return False
+        # Edge endpoints must have corresponding nodes
         for edges in self._edges_from.values():
             for edge in edges:
                 if edge.from_node not in self._nodes:

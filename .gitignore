@@ -32,8 +32,16 @@ Thumbs.db
 *.forge
 .forge-build/
 
+# Build artifacts
+*.pyd
+*.pdb
+
+# Forger cache (vite-style content-addressed cache)
+.forger/
+
 # Logs
 *.log
 
 # Settings (local)
 .claude/settings.local.json
+.playwright-mcp

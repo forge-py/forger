@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ast
 import logging
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -60,9 +59,7 @@ class ImportAnalyzer:
         self._visit_tree(tree, str(filepath))
         return list(self._imports)
 
-    def analyze_source(
-        self, source: str, filename: str = "<string>"
-    ) -> list[ImportInfo]:
+    def analyze_source(self, source: str, filename: str = "<string>") -> list[ImportInfo]:
         """Analyze Python source code string for imports."""
         self._imports.clear()
 
@@ -89,13 +86,17 @@ class ImportAnalyzer:
                         )
                     )
             elif isinstance(node, ast.ImportFrom):
+                level = node.level or 0
                 module = node.module or ""
+                # Preserve relative import dots in the module string
+                if level > 0:
+                    module = "." * level + module
                 names = [alias.name for alias in node.names]
                 self._imports.append(
                     ImportInfo(
                         module=module,
                         names=names,
-                        level=node.level or 0,
+                        level=level,
                         source_file=filename,
                         line=node.lineno,
                         is_from_import=True,
@@ -120,58 +121,65 @@ class ImportAnalyzer:
         )
 
         for imp in self._imports:
-            # Resolve the target module name
-            target = self._resolve_target(imp, source_module)
-            if not target:
+            # Resolve the target module name(s)
+            targets = self._resolve_targets(imp, source_module)
+            if not targets:
                 continue
 
-            # Ensure target node exists
-            if not graph.get_node(target):
-                graph.add_node(
-                    DependencyNode.new(target, NodeType.PythonModule).with_metadata(
-                        "discovered_by", "import_analyzer"
-                    )
-                )
-
-            # Add edge
-            edge_type = (
-                EdgeType.FromImport
-                if imp.is_from_import
-                else EdgeType.Import
-            )
+            edge_type = EdgeType.FromImport if imp.is_from_import else EdgeType.Import
             if imp.level > 0:
                 edge_type = EdgeType.RelativeImport
 
-            graph.add_edge(
-                DependencyEdge.new(
-                    source_module,
-                    target,
-                    edge_type,
-                    EdgeProvenance(
-                        source=(imp.source_file, imp.line),
-                        discovered_by="static_import_analyzer",
-                        description=f"{'from ... import' if imp.is_from_import else 'import'} {imp.module}",
-                    ),
-                )
-            )
+            for target in targets:
+                # Ensure target node exists
+                if not graph.get_node(target):
+                    graph.add_node(
+                        DependencyNode.new(target, NodeType.PythonModule).with_metadata(
+                            "discovered_by", "import_analyzer"
+                        )
+                    )
 
-    def _resolve_target(self, imp: ImportInfo, source_module: str) -> str | None:
-        """Resolve an import to a fully qualified module name."""
+                # Add edge
+                graph.add_edge(
+                    DependencyEdge.new(
+                        source_module,
+                        target,
+                        edge_type,
+                        EdgeProvenance(
+                            source=(imp.source_file, imp.line),
+                            discovered_by="static_import_analyzer",
+                            description=f"{'from ... import' if imp.is_from_import else 'import'} {imp.module}",
+                        ),
+                    )
+                )
+
+    def _resolve_targets(self, imp: ImportInfo, source_module: str) -> list[str]:
+        """Resolve an import to fully qualified module name(s).
+
+        Returns a list of target module names. For ``from X import Y`` this
+        returns both ``X`` and ``X.Y`` so that the package node is also
+        marked reachable.
+        """
         if imp.level == 0:
             # Absolute import
             if imp.is_from_import and imp.names:
-                return f"{imp.module}.{imp.names[0]}" if imp.module else imp.names[0]
-            return imp.module
+                base = imp.module
+                targets = [base] if base else []
+                if base:
+                    targets.extend(f"{base}.{n}" for n in imp.names)
+                return targets
+            return [imp.module] if imp.module else []
 
         # Relative import
         if not source_module:
-            return None
+            return []
 
         parts = source_module.split(".")
         if imp.level > len(parts):
-            return None
+            return []
 
         base = ".".join(parts[: len(parts) - imp.level + 1])
-        if imp.module:
-            return f"{base}.{imp.module}"
-        return base
+        module_part = imp.module.lstrip(".")  # strip leading dots
+        if module_part:
+            return [base, f"{base}.{module_part}"] if base else [f"{base}.{module_part}"]
+        return [base] if base else []
