@@ -193,12 +193,16 @@ def test_forger_api() -> None:
     """Test the forger.py API."""
     # Clear context
     import forger.api as api_module
-    from forger.api import get_context, include, include_module
+    from forger.api import defineConfig, get_context
     api_module._context = None
 
-    include("templates/**/*")
-    include_module("myapp.plugins.auth")
+    defineConfig(
+        {
+            "include": ["templates/**/*"],
+            "optimizers": {"django": {"settings_module": "myblog.settings"}},
+        }
+    )
 
     context = get_context()
-    assert len(context.included_globs) >= 1
-    assert "myapp.plugins.auth" in context.included_modules
+    assert context.config is not None
+    assert "templates/**/*" in context.config.include

@@ -2,12 +2,16 @@
 
 __version__ = "0.1.0"
 
-# Re-export the forger.py build-time API so projects can do:
-#   from forger import defineConfig, ForgerConfig
-#   from forger import include, include_module, include_resource, metadata
-from forger.api import ForgerConfig as ForgerConfig
-from forger.api import defineConfig as defineConfig
-from forger.api import include as include
-from forger.api import include_module as include_module
-from forger.api import include_resource as include_resource
-from forger.api import metadata as metadata
+# Re-export the forger.py build-time API
+from forger.api import (
+    ForgerConfig as ForgerConfig,
+)
+from forger.api import (
+    ForgerConfigDict as ForgerConfigDict,
+)
+from forger.api import (
+    OptimizerOptions as OptimizerOptions,
+)
+from forger.api import (
+    defineConfig as defineConfig,
+)

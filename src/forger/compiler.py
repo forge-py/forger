@@ -140,34 +140,29 @@ class Compiler:
             logger.error("Error executing forger.py: %s", e, exc_info=True)
             raise
 
-        # Get the context
+        # Get the config from the forger context
         context = api_module.get_context()
-        logger.info(
-            "forger.py contributed: %d paths, %d globs, %d modules, %d resources",
-            len(context.included_paths),
-            len(context.included_globs),
-            len(context.included_modules),
-            len(context.included_resources),
-        )
+        cfg = context.config
+        if cfg:
+            logger.info(
+                "forger.py contributed: %d includes, %d excludes, %d targets",
+                len(cfg.include),
+                len(cfg.exclude),
+                len(cfg.targets),
+            )
 
-        # Add contributed items to the graph
-        from forger.core import DependencyNode, NodeType
+            # Add included glob patterns as resource nodes to the graph
+            from forger.core import DependencyNode, NodeType
 
-        for module_name in context.included_modules:
-            if self.graph and not self.graph.get_node(module_name):
-                self.graph.add_node(
-                    DependencyNode.new(module_name, NodeType.PythonModule).with_metadata(
-                        "source", "forger.py"
+            for pattern in cfg.include:
+                if self.graph:
+                    self.graph.add_node(
+                        DependencyNode.new(pattern, NodeType.Resource).with_metadata(
+                            "source", "forger.py"
+                        )
                     )
-                )
-
-        for path in context.included_paths:
-            if self.graph:
-                self.graph.add_node(
-                    DependencyNode.new(str(path), NodeType.Resource).with_metadata(
-                        "source", "forger.py"
-                    )
-                )
+        else:
+            logger.info("forger.py contributed no config")
 
     def run_optimizers(self) -> None:
         """Run framework optimizers."""

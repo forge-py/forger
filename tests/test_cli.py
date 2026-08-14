@@ -47,12 +47,8 @@ def test_cli_compile_simple_project() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
 
-        (root / "main.py").write_text(
-            "import app\nprint('hello')\n"
-        )
-        (root / "app.py").write_text(
-            "import json\n\ndef run(): pass\n"
-        )
+        (root / "main.py").write_text("import app\nprint('hello')\n")
+        (root / "app.py").write_text("import json\n\ndef run(): pass\n")
 
         output = root / "app.forge"
         result = runner.invoke(
@@ -60,8 +56,10 @@ def test_cli_compile_simple_project() -> None:
             [
                 "compile",
                 str(root),
-                "--output", str(output),
-                "--entry-point", "main",
+                "--output",
+                str(output),
+                "--entry-point",
+                "main",
             ],
         )
 
@@ -79,8 +77,7 @@ def test_cli_compile_with_forger_py() -> None:
         (root / "main.py").write_text("import app\n")
         (root / "app.py").write_text("pass\n")
         (root / "forger.py").write_text(
-            "from forger import include_module\n"
-            'include_module("extra")\n'
+            "from forger import defineConfig\ndefineConfig({'entry': 'main.py'})\n"
         )
 
         output = root / "app.forge"
@@ -89,7 +86,8 @@ def test_cli_compile_with_forger_py() -> None:
             [
                 "compile",
                 str(root),
-                "--output", str(output),
+                "--output",
+                str(output),
             ],
         )
 
@@ -148,7 +146,8 @@ def test_cli_compile_verbose() -> None:
             [
                 "compile",
                 str(root),
-                "--output", str(output),
+                "--output",
+                str(output),
                 "--verbose",
             ],
         )
@@ -171,8 +170,10 @@ def test_cli_compile_custom_entry_point() -> None:
             [
                 "compile",
                 str(root),
-                "--output", str(output),
-                "--entry-point", "server",
+                "--output",
+                str(output),
+                "--entry-point",
+                "server",
             ],
         )
 

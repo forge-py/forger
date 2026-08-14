@@ -80,9 +80,10 @@ def test_compile_with_forger_py() -> None:
 
         # forger.py adds extra dependencies
         (root / "forger.py").write_text(
-            "from forger import include, include_module\n"
-            'include("templates/**/*")\n'
-            'include_module("myapp.plugins.auth")\n'
+            "from forger import defineConfig\n"
+            "defineConfig({\n"
+            '    "include": ["templates/**/*"],\n'
+            '})\n'
         )
 
         # Create template files
@@ -97,7 +98,8 @@ def test_compile_with_forger_py() -> None:
 
         # Check that forger.py contributions are in the graph
         assert compiler.graph is not None
-        assert compiler.graph.get_node("myapp.plugins.auth") is not None
+        # The include pattern should have been added as a resource node
+        assert any("templates" in str(n.id) for n in compiler.graph.nodes_by_type("resource"))
 
 
 def test_compile_with_subpackages() -> None:
@@ -446,8 +448,10 @@ def test_compiler_full_pipeline() -> None:
         (root / "app.py").write_text("import json\n")
 
         (root / "forger.py").write_text(
-            "from forger import include_module\n"
-            'include_module("extra_module")\n'
+            "from forger import defineConfig\n"
+            "defineConfig({\n"
+            '    "include": ["extra_module.py"],\n'
+            '})\n'
         )
 
         output = root / "app.forge"
