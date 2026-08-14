@@ -19,9 +19,9 @@ def test_compiler_initialization() -> None:
             output_path=output,
         )
 
-        assert compiler.project_root == project_root
+        assert compiler.project_root == project_root.resolve()
         assert compiler.entry_point == "main"
-        assert compiler.output_path == output
+        assert compiler.output_path == output.resolve()
 
 
 def test_compiler_with_source_files() -> None:
