@@ -24,6 +24,7 @@ module-name = "forger"
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
 filterwarnings = ["error"]
+pythonpath = ["src"]
 
 [tool.pyrefly]
 include = ["src/forger/", "tests/"]

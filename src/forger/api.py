@@ -158,10 +158,7 @@ def defineConfig(  # noqa: N802
             exclude=config.get("exclude", []),
             optimizers=config.get("optimizers", {}),
             targets=config.get("targets", []),
-            metadata={
-                k: str(v)
-                for k, v in config.get("metadata", {}).items()
-            },
+            metadata={k: str(v) for k, v in config.get("metadata", {}).items()},
         )
 
     _get_context().set_config(cfg)

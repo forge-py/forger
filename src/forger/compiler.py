@@ -34,9 +34,33 @@ class Compiler:
         self.project_root = project_root.resolve()
         self.entry_point = entry_point
         self.output_path = output_path.resolve()
+        self._vfs_path: Path = output_path.resolve()
         self.graph: DependencyGraph | None = None  # type: ignore[name-defined]
         self.source_files: list[Path] = []
         self._optimizer_context: OptimizerContext | None = None
+
+    @classmethod
+    def forge_from_vfs(
+        cls,
+        vfs_path: Path,
+        artifact_path: Path,
+    ) -> Compiler:
+        """Create a Compiler to package an existing VFS directory into .forge.
+
+        Args:
+            vfs_path: Path to the VFS directory (output of ``forger compile``).
+            artifact_path: Desired path for the .forge artifact.
+
+        Returns:
+            A ``Compiler`` instance configured to produce the artifact.
+        """
+        compiler = cls(
+            project_root=vfs_path,
+            entry_point="",
+            output_path=artifact_path,
+        )
+        compiler._vfs_path = vfs_path
+        return compiler
 
     def analyze(self) -> None:
         """Run static analysis on the project."""
@@ -185,12 +209,16 @@ class Compiler:
         else:
             logger.info("No framework optimizers activated")
 
-    def generate_artifact(self) -> None:
-        """Generate the .forge artifact."""
+    def generate_vfs(self) -> None:
+        """Generate the VFS directory from analysis results.
+
+        Copies all reachable Python modules and resources into the output
+        directory, preserving the module structure as the VFS layout.
+        """
         if not self.graph:
             raise RuntimeError("Analysis not yet performed")
 
-        logger.info("Generating artifact: %s", self.output_path)
+        logger.info("Generating VFS: %s", self.output_path)
         logger.info(
             "Graph: %d nodes, %d edges",
             self.graph.node_count(),
@@ -200,9 +228,108 @@ class Compiler:
         # Mark reachable nodes
         self.graph.mark_reachable_required()
 
-        # TODO: Serialize to .forge format
-        # This will use the Rust core forge module when available
-        logger.info("Artifact generation placeholder — Rust core integration pending")
+        # Create output directory
+        self.output_path.mkdir(parents=True, exist_ok=True)
+
+        # Copy reachable Python source files
+        copied = 0
+        for source_file in self.source_files:
+            module_name = self._path_to_module(source_file)
+            if module_name is None:
+                continue
+            node = self.graph.get_node(module_name)
+            if node is None or not node.required:
+                continue
+
+            # Compute relative path from project root
+            try:
+                rel_path = source_file.relative_to(self.project_root)
+            except ValueError:
+                continue
+
+            dest = self.output_path / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(source_file.read_bytes())
+            copied += 1
+
+        # Copy resources from include patterns
+        resource_count = self._copy_include_resources()
+
+        logger.info(
+            "VFS generated: %d modules, %d resources copied",
+            copied,
+            resource_count,
+        )
+
+    def generate_artifact(self) -> None:
+        """Generate the .forge artifact from VFS directory.
+
+        Packages the entire VFS directory into a single .forge file.
+        """
+        import json
+        import tarfile
+
+        vfs = self._vfs_path
+        artifact = self.output_path
+
+        logger.info("Generating artifact: %s from VFS: %s", artifact, vfs)
+
+        if not vfs.exists():
+            raise RuntimeError(f"VFS directory does not exist: {vfs}")
+
+        # Create .forge as a tar.gz with manifest
+        with tarfile.open(artifact, "w:gz") as tar:
+            # Add all files from VFS
+            files_list: list[str] = []
+            for file_path in vfs.rglob("*"):
+                if file_path.is_file():
+                    rel = file_path.relative_to(vfs)
+                    tar.add(file_path, arcname=str(rel))
+                    files_list.append(str(rel))
+
+            # Write manifest
+            manifest = {
+                "version": "0.1.0",
+                "entry_point": self.entry_point,
+                "project_root": str(self.project_root),
+                "files": files_list,
+            }
+            import io
+
+            manifest_data = json.dumps(manifest, indent=2).encode()
+            tarinfo = tarfile.TarInfo(name="MANIFEST.json")
+            tarinfo.size = len(manifest_data)
+            tar.addfile(tarinfo, io.BytesIO(manifest_data))
+
+        logger.info("Artifact generated: %s", artifact)
+
+    def _copy_include_resources(self) -> int:
+        """Copy resources matching include patterns from forger.py config."""
+        import forger.api as api_module
+        import fnmatch
+        import shutil
+
+        context = api_module.get_context()
+        cfg = context.config
+        if not cfg or not cfg.include:
+            return 0
+
+        copied = 0
+        for pattern in cfg.include:
+            for file_path in self.project_root.rglob("*"):
+                if file_path.is_file() and fnmatch.fnmatch(str(file_path), pattern):
+                    try:
+                        rel_path = file_path.relative_to(self.project_root)
+                    except ValueError:
+                        continue
+
+                    dest = self.output_path / rel_path
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    if not dest.exists():
+                        shutil.copy2(file_path, dest)
+                        copied += 1
+
+        return copied
 
     def diagnostic_summary(self) -> str:
         """Generate a diagnostic summary."""

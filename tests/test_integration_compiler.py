@@ -440,7 +440,7 @@ def test_optimizer_runs_on_django_project() -> None:
 
 
 def test_compiler_full_pipeline() -> None:
-    """Test the full compile pipeline: analyze → forger.py → optimizers → artifact."""
+    """Test the full compile pipeline: analyze → forger.py → optimizers → VFS → artifact."""
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
 
@@ -454,16 +454,27 @@ def test_compiler_full_pipeline() -> None:
             '})\n'
         )
 
-        output = root / "app.forge"
-        compiler = Compiler(root, "main", output)
+        vfs_dir = root / "dist"
+        compiler = Compiler(root, "main", vfs_dir)
 
-        # Full pipeline
+        # Full pipeline: analyze → VFS
         compiler.analyze()
         compiler.process_forger_py(root / "forger.py")
         compiler.run_optimizers()
-        compiler.generate_artifact()
+        compiler.generate_vfs()
+
+        # Verify VFS was created
+        assert vfs_dir.exists()
+        assert (vfs_dir / "main.py").exists()
 
         # Verify diagnostic summary
         summary = compiler.diagnostic_summary()
         assert "Compilation Summary" in summary
         assert str(root.resolve()) in summary
+
+        # Forge step: package VFS into .forge
+        artifact_path = root / "app.forge"
+        forge_compiler = Compiler.forge_from_vfs(vfs_dir, artifact_path)
+        forge_compiler.generate_artifact()
+
+        assert artifact_path.exists()

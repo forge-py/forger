@@ -1,4 +1,10 @@
-"""CLI entry point for Forger."""
+"""CLI entry point for Forger.
+
+Workflow:
+    forger compile  ->  dist/          (VFS directory)
+    forger forge    ->  app.forge      (package dist/ into .forge artifact)
+    forger build    ->  native binary  (consume .forge, produce executable)
+"""
 
 from __future__ import annotations
 
@@ -24,7 +30,7 @@ def main() -> None:
 @main.command()  # type: ignore[name-defined]
 @click.argument("source", type=click.Path(exists=True), default=".")  # type: ignore[name-defined]
 @click.option(  # type: ignore[name-defined]
-    "--output", "-o", default="app.forge", help="Output .forge file path."
+    "--output", "-o", default="dist", help="Output VFS directory."
 )
 @click.option(  # type: ignore[name-defined]
     "--entry-point", "-e", default="main", help="Entry point module."
@@ -40,7 +46,7 @@ def main() -> None:
 @click.option(  # type: ignore[name-defined]
     "--verbose", "-v", is_flag=True, help="Enable verbose output."
 )
-def compile(  # type: ignore[name-defined]
+def compile(  # noqa: A001  # type: ignore[name-defined]
     source: str,
     output: str,
     entry_point: str,
@@ -48,7 +54,7 @@ def compile(  # type: ignore[name-defined]
     forger_py: str | None,
     verbose: bool,
 ) -> None:
-    """Analyze and compile a Python project into a .forge artifact."""
+    """Analyze a Python project and output VFS to dist/ directory."""
     if verbose:
         logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, force=True)
     else:
@@ -58,6 +64,12 @@ def compile(  # type: ignore[name-defined]
     logger.info("Entry point: %s", entry_point)
 
     project_root = Path(source).resolve()
+    # Resolve output relative to the source directory, not CWD
+    output_path = Path(output)
+    if not output_path.is_absolute():
+        output_dir = project_root / output_path
+    else:
+        output_dir = output_path.resolve()
 
     # Run the compilation pipeline
     try:
@@ -66,17 +78,19 @@ def compile(  # type: ignore[name-defined]
         compiler = Compiler(
             project_root=project_root,
             entry_point=entry_point,
-            output_path=Path(output).resolve(),
+            output_path=output_dir,
         )
 
         # Process forger.py if present
         if forger_py:
             compiler.process_forger_py(Path(forger_py).resolve())
         else:
-            # Auto-detect forger.py
-            forger_py_path = project_root / "forger.py"
-            if forger_py_path.exists():
-                compiler.process_forger_py(forger_py_path)
+            # Auto-detect forger.py or forger.config.py
+            for forger_cfg_name in ("forger.py", "forger.config.py"):
+                forger_py_path = project_root / forger_cfg_name
+                if forger_py_path.exists():
+                    compiler.process_forger_py(forger_py_path)
+                    break
 
         # Run analysis
         compiler.analyze()
@@ -84,14 +98,51 @@ def compile(  # type: ignore[name-defined]
         # Run optimizers
         compiler.run_optimizers()
 
-        # Generate artifact
-        compiler.generate_artifact()
+        # Generate VFS directory
+        compiler.generate_vfs()
 
-        logger.info("Compilation complete: %s", output)
+        logger.info("Compilation complete: %s", output_dir)
         logger.info(compiler.diagnostic_summary())
 
     except Exception as e:
         logger.error("Compilation failed: %s", e, exc_info=True)
+        sys.exit(1)
+
+
+@main.command()  # type: ignore[name-defined]
+@click.argument("vfs_dir", type=click.Path(exists=True), default="dist")  # type: ignore[name-defined]
+@click.option(  # type: ignore[name-defined]
+    "--output", "-o", default="app.forge", help="Output .forge artifact path."
+)
+@click.option(  # type: ignore[name-defined]
+    "--verbose", "-v", is_flag=True, help="Enable verbose output."
+)
+def forge(  # type: ignore[name-defined]
+    vfs_dir: str,
+    output: str,
+    verbose: bool,
+) -> None:
+    """Package the VFS dist/ directory into a .forge artifact."""
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, force=True)
+    else:
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
+
+    logger.info("Forger forge: %s -> %s", vfs_dir, output)
+
+    vfs_path = Path(vfs_dir).resolve()
+    artifact_path = Path(output).resolve()
+
+    try:
+        from forger.compiler import Compiler
+
+        compiler = Compiler.forge_from_vfs(vfs_path, artifact_path)
+        compiler.generate_artifact()
+
+        logger.info("Artifact generated: %s", artifact_path)
+
+    except Exception as e:
+        logger.error("Forge failed: %s", e, exc_info=True)
         sys.exit(1)
 
 
@@ -132,7 +183,7 @@ def build(  # type: ignore[name-defined]
 
         builder.build()
 
-        logger.info("Build complete.")
+        logger.info("Build complete: %s", builder.output_dir)
 
     except Exception as e:
         logger.error("Build failed: %s", e, exc_info=True)
