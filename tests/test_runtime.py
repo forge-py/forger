@@ -5,7 +5,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from forger.runtime import setup_sys_path, get_runtime_info
+from forger.runtime import get_runtime_info, setup_sys_path
 
 
 def test_runtime_info() -> None:

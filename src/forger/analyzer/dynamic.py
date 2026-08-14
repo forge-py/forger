@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import ast
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -239,36 +238,58 @@ class DynamicImportAnalyzer:
         self, filepath: Path, content: str
     ) -> list[str]:
         """Extract entry points from pyproject.toml."""
-        patterns: list[str] = []
+        data = self._load_toml(content)
+        if data is None:
+            return []
 
+        patterns = self._collect_toml_eps(data)
+        return self._parse_module_refs(patterns)
+
+    def _load_toml(self, content: str) -> dict | None:
+        """Load and parse TOML content."""
         try:
             import tomllib
         except ImportError:
             try:
                 import tomli as tomllib  # type: ignore[no-redef]
             except ImportError:
-                return patterns
+                return None
 
         try:
-            data = tomllib.loads(content)
+            return tomllib.loads(content)
         except Exception:
-            return patterns
+            return None
 
-        # [project.scripts] and [project.gui-scripts]
+    def _collect_toml_eps(self, data: dict) -> list[str]:
+        """Collect entry point strings from parsed TOML data."""
+        patterns: list[str] = []
         project = data.get("project", {})
+        self._extend_scripts(project, patterns)
+        self._extend_entry_points(project, patterns)
+        return patterns
+
+    def _extend_scripts(
+        self, project: dict, patterns: list[str]
+    ) -> None:
+        """Extend patterns with script entry points."""
         for key in ("scripts", "gui-scripts", "gui_scripts"):
             scripts = project.get(key, {})
             if isinstance(scripts, dict):
                 patterns.extend(scripts.values())
 
-        # [project.entry-points]
+    def _extend_entry_points(
+        self, project: dict, patterns: list[str]
+    ) -> None:
+        """Extend patterns with entry-points section."""
         entry_points = project.get("entry-points", {})
         if isinstance(entry_points, dict):
             for group in entry_points.values():
                 if isinstance(group, dict):
                     patterns.extend(group.values())
 
-        # Parse module references: "module.path:attr" -> "module.path"
+    @staticmethod
+    def _parse_module_refs(patterns: list[str]) -> list[str]:
+        """Parse module references: 'module.path:attr' -> 'module.path'."""
         result: list[str] = []
         for ep in patterns:
             if isinstance(ep, str) and ":" in ep:

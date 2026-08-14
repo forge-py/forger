@@ -5,9 +5,9 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from forger.optimizers.flask import FlaskOptimizer
-from forger.optimizer import OptimizerContext
 from forger.core import DependencyGraph
+from forger.optimizer import OptimizerContext
+from forger.optimizers.flask import FlaskOptimizer
 
 
 def test_flask_detect_with_flask_import() -> None:

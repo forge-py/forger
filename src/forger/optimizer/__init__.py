@@ -79,7 +79,7 @@ def discover_optimizers() -> list[type[Optimizer]]:
     try:
         import forger.optimizers as opt_package
 
-        for importer, modname, ispkg in pkgutil.iter_modules(
+        for _importer, modname, _ispkg in pkgutil.iter_modules(
             opt_package.__path__, opt_package.__name__ + "."
         ):
             try:

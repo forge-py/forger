@@ -5,9 +5,9 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from forger.optimizers.django import DjangoOptimizer
+from forger.core import DependencyGraph
 from forger.optimizer import OptimizerContext
-from forger.core import DependencyGraph, NodeType
+from forger.optimizers.django import DjangoOptimizer
 
 
 def test_django_detect_with_package() -> None:

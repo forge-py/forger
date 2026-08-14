@@ -20,11 +20,6 @@ from forger.optimizer import Optimizer, OptimizerContext
 if TYPE_CHECKING:
     from forger.core import (  # type: ignore[attr-defined]
         DependencyGraph,
-        DependencyEdge,
-        DependencyNode,
-        EdgeProvenance,
-        EdgeType,
-        NodeType,
     )
 
 logger = logging.getLogger(__name__)
@@ -72,10 +67,7 @@ class DjangoOptimizer(Optimizer):
     def analyze(self, context: OptimizerContext, graph: DependencyGraph) -> None:
         """Analyze Django project configuration."""
         from forger.core import (  # noqa: E402
-            DependencyEdge,
             DependencyNode,
-            EdgeProvenance,
-            EdgeType,
             NodeType,
         )
 
@@ -133,7 +125,7 @@ class DjangoOptimizer(Optimizer):
         manage_py = project_root / "manage.py"
         if manage_py.exists():
             # Standard Django layout: project/config/settings.py
-            for dirpath, dirnames, filenames in project_root.walk():
+            for dirpath, _dirnames, filenames in project_root.walk():
                 if "settings.py" in filenames:
                     return dirpath / "settings.py"
 
@@ -151,54 +143,14 @@ class DjangoOptimizer(Optimizer):
         static_dirs: list[Path] = []
 
         try:
-            # Add the project root to sys.path temporarily
             if str(project_root) not in sys.path:
                 sys.path.insert(0, str(project_root))
 
-            # Try to import the settings module
-            spec = importlib_util.spec_from_file_location("settings", settings_path)
-            if spec and spec.loader:
-                settings_module = importlib_util.module_from_spec(spec)
-                spec.loader.exec_module(settings_module)
-
-                # INSTALLED_APPS
-                if hasattr(settings_module, "INSTALLED_APPS"):
-                    apps = settings_module.INSTALLED_APPS
-                    if isinstance(apps, (list, tuple)):
-                        installed_apps = [str(a) for a in apps]
-
-                # TEMPLATES
-                if hasattr(settings_module, "TEMPLATES"):
-                    templates = settings_module.TEMPLATES
-                    if isinstance(templates, list):
-                        for template_config in templates:
-                            if isinstance(template_config, dict):
-                                dirs = template_config.get("DIRS", [])
-                                for d in dirs:
-                                    p = Path(d)
-                                    if p.exists():
-                                        template_dirs.append(p)
-
-                                # APP_DIRS
-                                if template_config.get("APP_DIRS", False):
-                                    # Will be handled when we process apps
-                                    pass
-
-                # STATICFILES_DIRS
-                if hasattr(settings_module, "STATICFILES_DIRS"):
-                    staticfiles = settings_module.STATICFILES_DIRS
-                    if isinstance(staticfiles, (list, tuple)):
-                        for d in staticfiles:
-                            p = Path(d) if isinstance(d, str) else Path(d[0])
-                            if p.exists():
-                                static_dirs.append(p)
-
-                # STATIC_ROOT
-                if hasattr(settings_module, "STATIC_ROOT"):
-                    static_root = settings_module.STATIC_ROOT
-                    if static_root and Path(static_root).exists():
-                        static_dirs.append(Path(static_root))
-
+            settings_module = self._load_settings_module(settings_path)
+            if settings_module is not None:
+                installed_apps = self._extract_installed_apps(settings_module)
+                template_dirs = self._extract_template_dirs(settings_module)
+                static_dirs = self._extract_static_dirs(settings_module)
         except Exception as e:
             logger.warning("Failed to parse settings.py: %s", e)
         finally:
@@ -206,6 +158,54 @@ class DjangoOptimizer(Optimizer):
                 sys.path.remove(str(project_root))
 
         return installed_apps, template_dirs, static_dirs
+
+    @staticmethod
+    def _load_settings_module(settings_path: Path) -> object | None:
+        """Load a settings.py module from disk."""
+        spec = importlib_util.spec_from_file_location(
+            "settings", settings_path
+        )
+        if spec and spec.loader:
+            settings_module = importlib_util.module_from_spec(spec)
+            spec.loader.exec_module(settings_module)
+            return settings_module
+        return None
+
+    @staticmethod
+    def _extract_installed_apps(mod: object) -> list[str]:
+        """Extract INSTALLED_APPS from a settings module."""
+        if not hasattr(mod, "INSTALLED_APPS"):
+            return []
+        apps = mod.INSTALLED_APPS
+        if isinstance(apps, (list, tuple)):
+            return [str(a) for a in apps]
+        return []
+
+    @staticmethod
+    def _extract_template_dirs(mod: object) -> list[Path]:
+        """Extract TEMPLATES DIRS from a settings module."""
+        dirs: list[Path] = []
+        if not hasattr(mod, "TEMPLATES"):
+            return dirs
+        templates = mod.TEMPLATES
+        if not isinstance(templates, list):
+            return dirs
+        for tc in templates:
+            if not isinstance(tc, dict):
+                continue
+            for d in tc.get("DIRS", []):
+                p = Path(d)
+                if p.exists():
+                    dirs.append(p)
+        return dirs
+
+    @staticmethod
+    def _extract_static_dirs(mod: object) -> list[Path]:
+        """Extract STATICFILES_DIRS and STATIC_ROOT from settings module."""
+        dirs: list[Path] = []
+        dirs.extend(_resolve_staticfiles(mod))
+        _extend_static_root(mod, dirs)
+        return dirs
 
     def _add_django_app(
         self,
@@ -219,19 +219,16 @@ class DjangoOptimizer(Optimizer):
             NodeType,
         )
 
-        # Try to find the app directory
         app_path = self._find_app_path(app_name, project_root)
         if not app_path:
             return
 
-        # Add the app module
         graph.add_node(
             DependencyNode.new(app_name, NodeType.PythonPackage).with_metadata(
                 "discovered_by", "django_optimizer"
             )
         )
 
-        # Add app resources
         resource_dirs = [
             "templates",
             "static",
@@ -245,11 +242,14 @@ class DjangoOptimizer(Optimizer):
         for resource_dir in resource_dirs:
             dir_path = app_path / resource_dir
             if dir_path.exists() and dir_path.is_dir():
-                self._add_resource_directory(dir_path, f"django_app_{resource_dir}", graph)
+                self._add_resource_directory(
+                    dir_path, f"django_app_{resource_dir}", graph
+                )
 
-    def _find_app_path(self, app_name: str, project_root: Path) -> Path | None:
+    def _find_app_path(
+        self, app_name: str, project_root: Path
+    ) -> Path | None:
         """Find the filesystem path for a Django app."""
-        # Convert dotted name to path
         parts = app_name.split(".")
         search_path = project_root
 
@@ -285,3 +285,27 @@ class DjangoOptimizer(Optimizer):
                         "discovered_by", f"django_optimizer:{label}"
                     )
                 )
+
+
+def _resolve_staticfiles(mod: object) -> list[Path]:
+    """Resolve STATICFILES_DIRS entries to existing paths."""
+    dirs: list[Path] = []
+    if not hasattr(mod, "STATICFILES_DIRS"):
+        return dirs
+    staticfiles = mod.STATICFILES_DIRS
+    if not isinstance(staticfiles, (list, tuple)):
+        return dirs
+    for d in staticfiles:
+        p = Path(d) if isinstance(d, str) else Path(d[0])
+        if p.exists():
+            dirs.append(p)
+    return dirs
+
+
+def _extend_static_root(mod: object, dirs: list[Path]) -> None:
+    """Extend dirs list with STATIC_ROOT if it exists."""
+    if not hasattr(mod, "STATIC_ROOT"):
+        return
+    static_root = mod.STATIC_ROOT
+    if static_root and Path(static_root).exists():
+        dirs.append(Path(static_root))

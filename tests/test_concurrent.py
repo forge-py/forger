@@ -135,7 +135,7 @@ def test_concurrent_optimizer_runs() -> None:
 
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = []
-            for ctx in contexts:
+            for _ctx in contexts:
                 futures.append(executor.submit(discover_optimizers))
 
             for future in as_completed(futures):

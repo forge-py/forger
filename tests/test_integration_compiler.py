@@ -7,7 +7,6 @@ from pathlib import Path
 
 from forger.compiler import Compiler
 
-
 # ====================================================================
 # Simple project tests
 # ====================================================================
@@ -152,7 +151,9 @@ def test_compile_django_like_project() -> None:
 
         # manage.py
         (root / "manage.py").write_text(
-            "#!/usr/bin/env python\nimport os\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')\n"
+            "#!/usr/bin/env python\n"
+            "import os\n"
+            "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')\n"
         )
 
         # config/settings.py
@@ -461,4 +462,4 @@ def test_compiler_full_pipeline() -> None:
         # Verify diagnostic summary
         summary = compiler.diagnostic_summary()
         assert "Compilation Summary" in summary
-        assert str(root) in summary
+        assert str(root.resolve()) in summary

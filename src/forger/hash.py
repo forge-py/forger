@@ -9,7 +9,10 @@ from pathlib import Path
 from forger.core import HAS_RUST_CORE
 
 if HAS_RUST_CORE:
-    from forger.forger_core import content_hash_bytes_py  # type: ignore[import-not-found, import-untyped]
+    # type: ignore[import-not-found, import-untyped, missing-import]
+    from forger.forger_core import (
+        content_hash_bytes_py,
+    )
 
 
 def _hash_bytes(data: bytes) -> str:

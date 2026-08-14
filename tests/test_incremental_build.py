@@ -35,7 +35,7 @@ def test_graph_changed_rebuild_needed() -> None:
 
 def test_file_hash_change_detection() -> None:
     """Test that file content changes are detected via hashing."""
-    from forger.hash import content_hash, HashValue
+    from forger.hash import content_hash
 
     with tempfile.TemporaryDirectory() as tmpdir:
         f = Path(tmpdir) / "test.py"

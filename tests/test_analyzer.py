@@ -5,9 +5,9 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from forger.analyzer.dynamic import DynamicImportAnalyzer
 from forger.analyzer.imports import ImportAnalyzer
 from forger.analyzer.resources import ResourceAnalyzer
-from forger.analyzer.dynamic import DynamicImportAnalyzer
 
 
 def test_import_analyzer_simple() -> None:
@@ -105,8 +105,8 @@ def test_dependency_graph() -> None:
     """Test the dependency graph operations."""
     from forger.core import (
         DependencyEdge,
-        DependencyNode,
         DependencyGraph,
+        DependencyNode,
         EdgeProvenance,
         EdgeType,
         NodeType,
@@ -191,10 +191,9 @@ def test_optimizer_framework() -> None:
 
 def test_forger_api() -> None:
     """Test the forger.py API."""
-    from forger.api import include, include_module, get_context
-
     # Clear context
     import forger.api as api_module
+    from forger.api import get_context, include, include_module
     api_module._context = None
 
     include("templates/**/*")

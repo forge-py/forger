@@ -5,8 +5,6 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from forger.core import DependencyGraph, DependencyNode, NodeType
-
 
 def test_compiler_source_discovery() -> None:
     """Test that the compiler discovers all Python source files."""
@@ -152,7 +150,7 @@ def test_compiler_handles_large_files() -> None:
         root = Path(tmpdir)
 
         # Create a large file with many imports
-        imports = "\n".join(f"import os\n" * 1000)
+        imports = "\n".join("import os\n" * 1000)
         (root / "main.py").write_text(imports)
 
         output = root / "app.forge"

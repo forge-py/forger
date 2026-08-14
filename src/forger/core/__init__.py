@@ -9,14 +9,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
 # Try to import the compiled Rust extension
 # If not available, fall back to pure Python implementations
 try:
-    from forger import forger_core  # type: ignore[import-not-found, import-untyped]
+    import forger.forger_core  # noqa: F401  # type: ignore[import-not-found, import-untyped, missing-import]
 
     HAS_RUST_CORE = True
 except ImportError:

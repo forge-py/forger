@@ -9,10 +9,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from forger.analyzer.imports import ImportAnalyzer
 from forger.compiler import Compiler
-from forger.core import DependencyGraph, DependencyNode, NodeType
-
 
 # ====================================================================
 # Simulated package: Django-like
@@ -219,7 +216,9 @@ def test_flask_package_structure() -> None:
 
         templates = root / "templates"
         templates.mkdir()
-        (templates / "base.html").write_text("<html><body>{% block content %}{% endblock %}</body></html>")
+        (templates / "base.html").write_text(
+            "<html><body>{% block content %}{% endblock %}</body></html>"
+        )
         (templates / "index.html").write_text("{% extends 'base.html' %}")
 
         static = root / "static"

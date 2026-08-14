@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -41,11 +40,6 @@ class Compiler:
 
     def analyze(self) -> None:
         """Run static analysis on the project."""
-        from forger.analyzer import (
-            DynamicImportAnalyzer,
-            ImportAnalyzer,
-            ResourceAnalyzer,
-        )
         from forger.core import DependencyGraph, DependencyNode, NodeType
 
         logger.info("Starting analysis of %s", self.project_root)
@@ -53,39 +47,46 @@ class Compiler:
         # Create dependency graph
         self.graph = DependencyGraph()
         self.graph.add_entry_point(self.entry_point)
-
-        # Add entry point node
-        self.graph.add_node(
-            DependencyNode.new(self.entry_point, NodeType.EntryPoint)
-        )
+        self.graph.add_node(DependencyNode.new(self.entry_point, NodeType.EntryPoint))
 
         # Discover Python source files
         self.source_files = self._discover_source_files()
         logger.info("Discovered %d Python source files", len(self.source_files))
 
         # Analyze imports
+        self._analyze_imports()
+
+        # Analyze dynamic imports
+        self._analyze_dynamic_imports()
+
+        # Analyze resources
+        self._analyze_resources()
+
+    def _analyze_imports(self) -> None:
+        """Analyze static imports across all source files."""
+        from forger.analyzer import ImportAnalyzer
+        from forger.core import DependencyNode, NodeType
+
+        assert self.graph is not None
         import_analyzer = ImportAnalyzer()
         for source_file in self.source_files:
             module_name = self._path_to_module(source_file)
             if not module_name:
                 continue
 
-            # Add module node
             if not self.graph.get_node(module_name):
-                self.graph.add_node(
-                    DependencyNode.new(module_name, NodeType.PythonModule)
-                )
+                self.graph.add_node(DependencyNode.new(module_name, NodeType.PythonModule))
 
-            # Analyze imports
             imports = import_analyzer.analyze_file(source_file)
             import_analyzer.contribute_to_graph(self.graph, module_name)
 
             if imports:
-                logger.debug(
-                    "Found %d imports in %s", len(imports), source_file
-                )
+                logger.debug("Found %d imports in %s", len(imports), source_file)
 
-        # Analyze dynamic imports
+    def _analyze_dynamic_imports(self) -> None:
+        """Analyze dynamic imports across all source files."""
+        from forger.analyzer import DynamicImportAnalyzer
+
         dynamic_analyzer = DynamicImportAnalyzer()
         for source_file in self.source_files:
             hints = dynamic_analyzer.analyze_file(source_file)
@@ -98,7 +99,10 @@ class Compiler:
                         hint.line,
                     )
 
-        # Analyze resources
+    def _analyze_resources(self) -> None:
+        """Analyze resource accesses across all source files."""
+        from forger.analyzer import ResourceAnalyzer
+
         resource_analyzer = ResourceAnalyzer()
         for source_file in self.source_files:
             accesses = resource_analyzer.analyze_file(source_file)
@@ -152,17 +156,17 @@ class Compiler:
         for module_name in context.included_modules:
             if self.graph and not self.graph.get_node(module_name):
                 self.graph.add_node(
-                    DependencyNode.new(
-                        module_name, NodeType.PythonModule
-                    ).with_metadata("source", "forger.py")
+                    DependencyNode.new(module_name, NodeType.PythonModule).with_metadata(
+                        "source", "forger.py"
+                    )
                 )
 
         for path in context.included_paths:
             if self.graph:
                 self.graph.add_node(
-                    DependencyNode.new(
-                        str(path), NodeType.Resource
-                    ).with_metadata("source", "forger.py")
+                    DependencyNode.new(str(path), NodeType.Resource).with_metadata(
+                        "source", "forger.py"
+                    )
                 )
 
     def run_optimizers(self) -> None:

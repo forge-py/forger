@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Union
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +24,9 @@ class Builder:
 
     def __init__(
         self,
-        artifact_path: Union[Path, str],
+        artifact_path: Path | str,
         target: str,
-        output_dir: Union[Path, str, None] = None,
+        output_dir: Path | str | None = None,
     ) -> None:
         self.artifact_path = Path(artifact_path).resolve()
         self.target = target

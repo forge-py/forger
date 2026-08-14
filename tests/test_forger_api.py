@@ -6,10 +6,10 @@ import tempfile
 from pathlib import Path
 
 from forger.api import (
+    get_context,
     include,
     include_module,
     include_resource,
-    get_context,
     metadata,
 )
 

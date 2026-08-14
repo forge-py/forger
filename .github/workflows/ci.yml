@@ -20,12 +20,12 @@ jobs:
       - run: cargo test --all-features
 
   python-test:
-    name: Python tests (${{ matrix.os }})
+    name: Python tests (${{ matrix.os }} py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +34,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: ${{ matrix.python-version }}
       - run: uv sync --all-groups
       - run: uv run pytest tests/ -v --tb=short
 

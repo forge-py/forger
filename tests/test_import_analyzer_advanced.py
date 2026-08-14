@@ -7,7 +7,6 @@ from pathlib import Path
 
 from forger.analyzer.imports import ImportAnalyzer
 
-
 # --- Basic import patterns ---
 
 def test_import_star() -> None:

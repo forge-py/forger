@@ -148,7 +148,10 @@ class ImportAnalyzer:
                         EdgeProvenance(
                             source=(imp.source_file, imp.line),
                             discovered_by="static_import_analyzer",
-                            description=f"{'from ... import' if imp.is_from_import else 'import'} {imp.module}",
+                            description=(
+                                f"{'from ... import' if imp.is_from_import else 'import'} "
+                                f"{imp.module}"
+                            ),
                         ),
                     )
                 )

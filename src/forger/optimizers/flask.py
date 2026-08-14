@@ -20,8 +20,6 @@ from forger.optimizer import Optimizer, OptimizerContext
 if TYPE_CHECKING:
     from forger.core import (  # type: ignore[attr-defined]
         DependencyGraph,
-        DependencyNode,
-        NodeType,
     )
 
 logger = logging.getLogger(__name__)
@@ -97,50 +95,67 @@ class FlaskOptimizer(Optimizer):
         graph: DependencyGraph,
     ) -> None:
         """Analyze a source file for Flask app instantiation."""
-        from forger.core import (  # noqa: E402
-            DependencyNode,
-            NodeType,
-        )
-
-        try:
-            content = source_file.read_text(encoding="utf-8")
-            tree = ast.parse(content, filename=str(source_file))
-        except (OSError, UnicodeDecodeError, SyntaxError):
+        tree = self._parse_file(source_file)
+        if tree is None:
             return
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-
-            # Look for Flask(...) calls
             func_name = self._get_call_name(node.func)
             if not func_name or "Flask" not in func_name:
                 continue
+            self._process_flask_call(node, project_root, graph)
 
-            # Extract keyword arguments
-            template_folder = None
-            static_folder = None
+    def _parse_file(self, source_file: Path) -> ast.AST | None:
+        """Parse a Python source file, returning None on error."""
+        try:
+            content = source_file.read_text(encoding="utf-8")
+            return ast.parse(content, filename=str(source_file))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            return None
 
-            for kw in node.keywords:
-                if kw.arg == "template_folder":
-                    template_folder = self._get_constant_value(kw.value)
-                elif kw.arg == "static_folder":
-                    static_folder = self._get_constant_value(kw.value)
+    def _process_flask_call(
+        self,
+        call_node: ast.Call,
+        project_root: Path,
+        graph: DependencyGraph,
+    ) -> None:
+        """Process a Flask(...) call node and register resources."""
+        kwargs = self._extract_flask_kwargs(call_node)
+        self._register_flask_resources(project_root, kwargs, graph)
 
-            # Add discovered resource directories
-            if template_folder:
-                template_path = project_root / template_folder
-                if template_path.exists():
-                    self._add_resource_directory(
-                        template_path, "flask_templates", graph
-                    )
+    def _extract_flask_kwargs(
+        self, call_node: ast.Call
+    ) -> dict[str, str | None]:
+        """Extract template_folder and static_folder from Flask kwargs."""
+        result: dict[str, str | None] = {
+            "template_folder": None,
+            "static_folder": None,
+        }
+        for kw in call_node.keywords:
+            if kw.arg == "template_folder":
+                result["template_folder"] = self._get_constant_value(kw.value)
+            elif kw.arg == "static_folder":
+                result["static_folder"] = self._get_constant_value(kw.value)
+        return result
 
-            if static_folder:
-                static_path = project_root / static_folder
-                if static_path.exists():
-                    self._add_resource_directory(
-                        static_path, "flask_static", graph
-                    )
+    def _register_flask_resources(
+        self,
+        project_root: Path,
+        kwargs: dict[str, str | None],
+        graph: DependencyGraph,
+    ) -> None:
+        """Register Flask resource directories with the graph."""
+        if kwargs["template_folder"]:
+            tp = project_root / kwargs["template_folder"]
+            if tp.exists():
+                self._add_resource_directory(tp, "flask_templates", graph)
+
+        if kwargs["static_folder"]:
+            sp = project_root / kwargs["static_folder"]
+            if sp.exists():
+                self._add_resource_directory(sp, "flask_static", graph)
 
     def _get_call_name(self, node: ast.expr) -> str | None:
         """Extract function name from a call target."""

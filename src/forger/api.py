@@ -7,7 +7,6 @@ to declare dependencies that cannot be inferred automatically.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 
 class _ForgerContext:
