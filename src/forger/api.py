@@ -82,24 +82,21 @@ def include(pattern: str | Path, *, recursive: bool = True) -> None:
         ```
     """
     ctx = _get_context()
-    if isinstance(pattern, Path):
-        pattern = str(pattern)
+    path = Path(pattern) if not isinstance(pattern, Path) else pattern
 
-    if "*" in pattern or "/" in pattern or "\\" in pattern:
-        ctx.add_glob(pattern)
-    else:
-        path = Path(pattern)
-        if path.exists():
-            if path.is_dir():
-                glob_pat = str(pattern)
-                if not glob_pat.endswith("/"):
-                    glob_pat += "/"
-                glob_pat += ("**/*" if recursive else "*")
-                ctx.add_glob(glob_pat)
-            else:
-                ctx.add_path(path.resolve())
+    if path.exists():
+        if path.is_dir():
+            glob_pat = str(pattern)
+            if not glob_pat.endswith("/"):
+                glob_pat += "/"
+            glob_pat += ("**/*" if recursive else "*")
+            ctx.add_glob(glob_pat)
         else:
-            ctx.add_glob(pattern)
+            ctx.add_path(path.resolve())
+    elif "*" in str(pattern) or "/" in str(pattern) or "\\" in str(pattern):
+        ctx.add_glob(str(pattern))
+    else:
+        ctx.add_glob(str(pattern))
 
 
 def include_module(module_name: str) -> None:

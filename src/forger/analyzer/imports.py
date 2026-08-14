@@ -88,8 +88,8 @@ class ImportAnalyzer:
             elif isinstance(node, ast.ImportFrom):
                 level = node.level or 0
                 module = node.module or ""
-                # Preserve relative import dots in the module string
-                if level > 0:
+                # Prefix dots for relative imports that have a module part
+                if level > 0 and module:
                     module = "." * level + module
                 names = [alias.name for alias in node.names]
                 self._imports.append(
@@ -178,8 +178,14 @@ class ImportAnalyzer:
         if imp.level > len(parts):
             return []
 
-        base = ".".join(parts[: len(parts) - imp.level + 1])
-        module_part = imp.module.lstrip(".")  # strip leading dots
+        base = ".".join(parts[: len(parts) - imp.level])
+        module_part = imp.module if imp.module else ""
         if module_part:
             return [base, f"{base}.{module_part}"] if base else [f"{base}.{module_part}"]
         return [base] if base else []
+
+    # Backward-compatible alias: return most specific target
+    def _resolve_target(self, imp: ImportInfo, source_module: str) -> str | None:
+        targets = self._resolve_targets(imp, source_module)
+        # Return the last (most specific) target for backward compatibility
+        return targets[-1] if targets else None

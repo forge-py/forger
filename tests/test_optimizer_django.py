@@ -42,9 +42,7 @@ def test_django_detect_without_package() -> None:
 def test_django_find_settings() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
-        (root / "settings.py").write_text(
-            "INSTALLED_APPS = ['myapp']\n"
-        )
+        (root / "settings.py").write_text("INSTALLED_APPS = ['myapp']\n")
 
         optimizer = DjangoOptimizer()
         settings = optimizer._find_settings(root)
@@ -57,9 +55,7 @@ def test_django_find_settings_nested() -> None:
         root = Path(tmpdir)
         config = root / "config"
         config.mkdir()
-        (config / "settings.py").write_text(
-            "INSTALLED_APPS = ['myapp']\n"
-        )
+        (config / "settings.py").write_text("INSTALLED_APPS = ['myapp']\n")
 
         optimizer = DjangoOptimizer()
         settings = optimizer._find_settings(root)
@@ -72,7 +68,8 @@ def test_django_parse_settings() -> None:
         settings = root / "settings.py"
         settings.write_text(
             "import os\n"
-            "BASE_DIR = os.path.dirname(os.path.abspath(__file__))\n"
+            "from pathlib import Path\n"
+            "BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))\n"
             "INSTALLED_APPS = [\n"
             "    'django.contrib.admin',\n"
             "    'myapp',\n"
@@ -88,9 +85,7 @@ def test_django_parse_settings() -> None:
         templates.mkdir()
 
         optimizer = DjangoOptimizer()
-        apps, template_dirs, static_dirs = optimizer._parse_settings(
-            settings, root
-        )
+        apps, template_dirs, static_dirs = optimizer._parse_settings(settings, root)
 
         assert "myapp" in apps
         assert "django.contrib.admin" in apps
@@ -129,8 +124,7 @@ def test_django_full_analysis() -> None:
 
         # settings.py
         (root / "settings.py").write_text(
-            "INSTALLED_APPS = ['myapp']\n"
-            "TEMPLATES = [{'DIRS': [], 'APP_DIRS': False}]\n"
+            "INSTALLED_APPS = ['myapp']\nTEMPLATES = [{'DIRS': [], 'APP_DIRS': False}]\n"
         )
 
         # myapp/

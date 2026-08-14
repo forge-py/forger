@@ -200,10 +200,92 @@ class DynamicImportAnalyzer:
         except (OSError, UnicodeDecodeError):
             return patterns
 
-        # Simple regex for entry_points patterns
-        for match in re.finditer(r"entry_points\s*[=:]\s*\{([^}]+)\}", content, re.DOTALL):
-            block = match.group(1)
-            for mod_match in re.finditer(r"['\"](\w+(?:\.\w+)*)['\"]", block):
-                patterns.append(mod_match.group(1))
+        if filepath.suffix == ".toml":
+            patterns.extend(self._extract_entry_points_toml(filepath, content))
+        else:
+            patterns.extend(self._extract_entry_points_ast(content))
 
+        return patterns
+
+    def _extract_entry_points_ast(self, content: str) -> list[str]:
+        """Extract entry points from setup.py using AST."""
+        patterns: list[str] = []
+
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return patterns
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            # Look for setup(entry_points={...}) calls
+            for kw in node.keywords:
+                if kw.arg != "entry_points":
+                    continue
+                if not isinstance(kw.value, ast.Dict):
+                    continue
+                # entry_points is a dict: {"console_scripts": [...], ...}
+                for value in kw.value.values:
+                    if isinstance(value, ast.List):
+                        for item in value.elts:
+                            patterns.extend(
+                                self._extract_module_from_ep(item)
+                            )
+
+        return patterns
+
+    def _extract_entry_points_toml(
+        self, filepath: Path, content: str
+    ) -> list[str]:
+        """Extract entry points from pyproject.toml."""
+        patterns: list[str] = []
+
+        try:
+            import tomllib
+        except ImportError:
+            try:
+                import tomli as tomllib  # type: ignore[no-redef]
+            except ImportError:
+                return patterns
+
+        try:
+            data = tomllib.loads(content)
+        except Exception:
+            return patterns
+
+        # [project.scripts] and [project.gui-scripts]
+        project = data.get("project", {})
+        for key in ("scripts", "gui-scripts", "gui_scripts"):
+            scripts = project.get(key, {})
+            if isinstance(scripts, dict):
+                patterns.extend(scripts.values())
+
+        # [project.entry-points]
+        entry_points = project.get("entry-points", {})
+        if isinstance(entry_points, dict):
+            for group in entry_points.values():
+                if isinstance(group, dict):
+                    patterns.extend(group.values())
+
+        # Parse module references: "module.path:attr" -> "module.path"
+        result: list[str] = []
+        for ep in patterns:
+            if isinstance(ep, str) and ":" in ep:
+                result.append(ep.split(":", 1)[0])
+        return result
+
+    def _extract_module_from_ep(
+        self, node: ast.expr
+    ) -> list[str]:
+        """Extract module name from an entry point AST node."""
+        patterns: list[str] = []
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            # "name = module.path:func"
+            if ":" in node.value:
+                parts = node.value.split("=", 1)
+                if len(parts) == 2:
+                    mod_part = parts[1].strip().split(":", 1)[0].strip()
+                    if mod_part:
+                        patterns.append(mod_part)
         return patterns

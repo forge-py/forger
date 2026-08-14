@@ -5,8 +5,6 @@ open(), Path.open(), Path.read_text(), Path.read_bytes(),
 glob.glob(), os.listdir(), os.scandir(), importlib.resources, etc.
 """
 
-from __future__ import annotations
-
 import ast
 import logging
 from dataclasses import dataclass
@@ -47,6 +45,14 @@ class ResourceAnalyzer:
         "importlib.resources.read_text",
         "importlib.resources.read_bytes",
         "importlib.resources.path",
+        "read_text",
+        "read_bytes",
+    }
+
+    # Names whose calls are file access even when qualified differently
+    ACCESS_METHODS = {
+        "open", "read_text", "read_bytes", "write_text", "write_bytes",
+        "glob", "rglob", "listdir", "scandir", "get_data",
     }
 
     def __init__(self) -> None:
@@ -99,24 +105,23 @@ class ResourceAnalyzer:
                 continue
 
             # Check if this is a known file access function
-            if func_name in self.FILE_ACCESS_FUNCTIONS or func_name.split(".")[0] in {
-                "open",
-                "glob",
-                "listdir",
-                "scandir",
-            }:
-                # Try to extract the path argument
+            is_known = func_name in self.FILE_ACCESS_FUNCTIONS
+            # Also check if the last component is an access method
+            if not is_known:
+                last_part = func_name.rsplit(".", 1)[-1]
+                is_known = last_part in self.ACCESS_METHODS
+
+            if is_known:
                 path_expr, is_dynamic = self._extract_path_arg(node)
-                if path_expr:
-                    self._accesses.append(
-                        ResourceAccess(
-                            path_expr=path_expr,
-                            access_type=func_name,
-                            source_file=filename,
-                            line=node.lineno,
-                            is_dynamic=is_dynamic,
-                        )
+                self._accesses.append(
+                    ResourceAccess(
+                        path_expr=path_expr if path_expr else "",
+                        access_type=func_name,
+                        source_file=filename,
+                        line=node.lineno,
+                        is_dynamic=is_dynamic,
                     )
+                )
 
     def _get_call_name(self, node: ast.expr) -> str | None:
         """Extract the function name from a call node."""
@@ -126,6 +131,11 @@ class ResourceAnalyzer:
             value_name = self._get_call_name(node.value)
             if value_name:
                 return f"{value_name}.{node.attr}"
+            # Handle chained calls like Path("x").read_text()
+            if isinstance(node.value, ast.Call):
+                func_name = self._get_call_name(node.value.func)
+                if func_name:
+                    return f"{func_name}.{node.attr}"
         return None
 
     def _extract_path_arg(self, node: ast.Call) -> tuple[str | None, bool]:
@@ -133,28 +143,24 @@ class ResourceAnalyzer:
 
         Returns (path_string, is_dynamic).
         """
-        if not node.args:
-            return None, False
+        # Direct argument: open("path"), glob.glob("path"), etc.
+        if node.args:
+            first_arg = node.args[0]
+            if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
+                return first_arg.value, False
+            if isinstance(first_arg, (ast.FormattedValue, ast.JoinedStr, ast.Name, ast.BinOp)):
+                return None, True
+            if isinstance(first_arg, ast.Call):
+                if first_arg.args and isinstance(first_arg.args[0], ast.Constant):
+                    return first_arg.args[0].value, False
+                return None, True
 
-        first_arg = node.args[0]
-        is_dynamic = False
-
-        if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
-            return first_arg.value, False
-        elif isinstance(first_arg, ast.FormattedValue):
-            # f-string — dynamic
-            return None, True
-        elif isinstance(first_arg, ast.JoinedStr):
-            # f-string literal — dynamic
-            return None, True
-        elif isinstance(first_arg, ast.Name):
-            # Variable — dynamic
-            return None, True
-        elif isinstance(first_arg, ast.BinOp):
-            # String concatenation — dynamic
-            return None, True
-        elif isinstance(first_arg, ast.Call):
-            # Function call result — dynamic
-            return None, True
+        # Constructor argument: Path("path").read_text()
+        if isinstance(node.func, ast.Attribute):
+            if isinstance(node.func.value, ast.Call):
+                ctor = node.func.value
+                if ctor.args and isinstance(ctor.args[0], ast.Constant):
+                    return ctor.args[0].value, False
+                return None, True
 
         return None, False
