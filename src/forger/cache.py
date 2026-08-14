@@ -44,6 +44,7 @@ class Cache:
         return cache
 
     def _state_file(self) -> Path:
+        assert self.cache_dir is not None
         return self.cache_dir / "cache_index.json"
 
     def load(self) -> None:

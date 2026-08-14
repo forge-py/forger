@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # Try to import the compiled Rust extension
 # If not available, fall back to pure Python implementations
 try:
-    from forger import forger_core
+    from forger import forger_core  # type: ignore[import-not-found, import-untyped]
 
     HAS_RUST_CORE = True
 except ImportError:

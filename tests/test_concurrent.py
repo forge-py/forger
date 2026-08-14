@@ -106,6 +106,7 @@ def test_stress_compiler_with_many_modules() -> None:
         compiler.analyze()
 
         assert len(compiler.source_files) >= 500
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 500
 
 

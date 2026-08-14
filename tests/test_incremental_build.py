@@ -116,6 +116,7 @@ def test_compiler_incremental_analysis() -> None:
         compiler = Compiler(root, "main", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         initial_nodes = compiler.graph.node_count()
 
         # Add a new file
@@ -123,6 +124,7 @@ def test_compiler_incremental_analysis() -> None:
 
         # Re-analyze
         compiler.analyze()
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= initial_nodes
 
 

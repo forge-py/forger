@@ -200,6 +200,7 @@ def test_compiler_entry_point_resolution() -> None:
         compiler = Compiler(root, "main", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         assert "main" in compiler.graph.entry_points()
 
 

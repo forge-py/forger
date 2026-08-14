@@ -251,6 +251,7 @@ def test_compiler_respects_import_semantics() -> None:
         compiler = Compiler(root, "main", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         reachable = compiler.graph.find_reachable()
         assert "main" in reachable
         assert "utils" in reachable

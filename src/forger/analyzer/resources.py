@@ -152,7 +152,7 @@ class ResourceAnalyzer:
                 return None, True
             if isinstance(first_arg, ast.Call):
                 if first_arg.args and isinstance(first_arg.args[0], ast.Constant):
-                    return first_arg.args[0].value, False
+                    return str(first_arg.args[0].value), False
                 return None, True
 
         # Constructor argument: Path("path").read_text()
@@ -160,7 +160,7 @@ class ResourceAnalyzer:
             if isinstance(node.func.value, ast.Call):
                 ctor = node.func.value
                 if ctor.args and isinstance(ctor.args[0], ast.Constant):
-                    return ctor.args[0].value, False
+                    return str(ctor.args[0].value), False
                 return None, True
 
         return None, False

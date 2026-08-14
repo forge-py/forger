@@ -208,9 +208,12 @@ def test_mark_reachable_required() -> None:
 
     graph.mark_reachable_required()
 
-    assert graph.get_node("main").required is True
-    assert graph.get_node("used").required is True
-    assert graph.get_node("unused").required is False
+    main_node = graph.get_node("main")
+    used_node = graph.get_node("used")
+    unused_node = graph.get_node("unused")
+    assert main_node is not None and main_node.required is True
+    assert used_node is not None and used_node.required is True
+    assert unused_node is not None and unused_node.required is False
 
 
 # --- Node types ---

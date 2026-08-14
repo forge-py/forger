@@ -67,6 +67,7 @@ def test_compile_package_project() -> None:
         compiler = Compiler(root, "main", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 4
 
 
@@ -96,6 +97,7 @@ def test_compile_with_forger_py() -> None:
         compiler.process_forger_py(root / "forger.py")
 
         # Check that forger.py contributions are in the graph
+        assert compiler.graph is not None
         assert compiler.graph.get_node("myapp.plugins.auth") is not None
 
 
@@ -135,6 +137,7 @@ def test_compile_with_subpackages() -> None:
         compiler = Compiler(root, "main", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 5
 
 
@@ -193,6 +196,7 @@ def test_compile_django_like_project() -> None:
         compiler = Compiler(root, "main", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 3
 
 
@@ -221,6 +225,7 @@ def test_compile_flask_like_project() -> None:
         compiler = Compiler(root, "app", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 2
 
 
@@ -247,6 +252,7 @@ def test_compile_fastapi_like_project() -> None:
         compiler = Compiler(root, "main", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 1
 
 
@@ -270,6 +276,7 @@ def test_dependency_chain_resolution() -> None:
         compiler = Compiler(root, "main", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         reachable = compiler.graph.find_reachable()
         assert "a" in reachable
         assert "b" in reachable
@@ -291,6 +298,7 @@ def test_circular_import_handling() -> None:
         compiler.analyze()
 
         # Should complete without hanging
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 3
 
 
@@ -309,6 +317,7 @@ def test_diamond_dependency() -> None:
         compiler = Compiler(root, "main", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         reachable = compiler.graph.find_reachable()
         assert "c" in reachable
 
@@ -326,6 +335,7 @@ def test_orphan_module_not_reachable() -> None:
         compiler = Compiler(root, "main", output)
         compiler.analyze()
 
+        assert compiler.graph is not None
         reachable = compiler.graph.find_reachable()
         assert "used" in reachable
         assert "orphan" not in reachable
@@ -380,6 +390,7 @@ def test_large_project_performance() -> None:
         # Should discover all 102 files
         assert len(compiler.source_files) >= 100
         # Reachable should include at least the directly imported ones
+        assert compiler.graph is not None
         reachable = compiler.graph.find_reachable()
         assert "main" in reachable
 
@@ -421,6 +432,7 @@ def test_optimizer_runs_on_django_project() -> None:
         compiler.run_optimizers()
 
         # Graph should have nodes from both analysis and optimizer
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 3
 
 

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from forger.core import DependencyGraph  # type: ignore[attr-defined]
+    from forger.optimizer import OptimizerContext  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 

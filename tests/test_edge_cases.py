@@ -256,6 +256,7 @@ def test_no_entry_point_file() -> None:
         compiler.analyze()
 
         # Should still work with the entry point registered
+        assert compiler.graph is not None
         assert "nonexistent" in compiler.graph.entry_points()
 
 

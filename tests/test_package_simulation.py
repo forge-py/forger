@@ -140,6 +140,7 @@ def test_django_package_structure() -> None:
 
         # Verify analysis
         assert len(compiler.source_files) >= 8
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 5
 
 
@@ -239,6 +240,7 @@ def test_flask_package_structure() -> None:
         compiler.analyze()
 
         assert len(compiler.source_files) >= 6
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 4
 
 
@@ -338,6 +340,7 @@ def test_ml_package_structure() -> None:
         compiler.analyze()
 
         assert len(compiler.source_files) >= 7
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 5
 
 
@@ -418,6 +421,7 @@ def test_scraper_package_structure() -> None:
         compiler.analyze()
 
         assert len(compiler.source_files) >= 5
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 4
 
 
@@ -518,6 +522,7 @@ def test_cli_tool_package_structure() -> None:
         compiler.analyze()
 
         assert len(compiler.source_files) >= 8
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 5
 
 
@@ -601,6 +606,7 @@ def test_plugin_architecture_structure() -> None:
         compiler.analyze()
 
         assert len(compiler.source_files) >= 6
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 4
 
 
@@ -743,4 +749,5 @@ def test_api_server_structure() -> None:
         compiler.analyze()
 
         assert len(compiler.source_files) >= 10
+        assert compiler.graph is not None
         assert compiler.graph.node_count() >= 6

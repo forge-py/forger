@@ -9,7 +9,7 @@ from pathlib import Path
 from forger.core import HAS_RUST_CORE
 
 if HAS_RUST_CORE:
-    from forger.forger_core import content_hash_bytes_py
+    from forger.forger_core import content_hash_bytes_py  # type: ignore[import-not-found, import-untyped]
 
 
 def _hash_bytes(data: bytes) -> str:
@@ -53,4 +53,3 @@ class HashValue:
 
     def __hash__(self) -> int:
         return hash(self.hex_digest)
-
