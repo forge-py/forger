@@ -258,7 +258,7 @@ class Compiler:
     def _path_to_module(self, filepath: Path) -> str | None:
         """Convert a file path to a Python module name."""
         try:
-            relative = filepath.relative_to(self.project_root)
+            relative = filepath.resolve().relative_to(self.project_root)
         except ValueError:
             return None
 
