@@ -214,6 +214,7 @@ class Compiler:
 
         Copies all reachable Python modules and resources into the output
         directory, preserving the module structure as the VFS layout.
+        Also copies required third-party packages from .venv into dist/.venv.
         """
         if not self.graph:
             raise RuntimeError("Analysis not yet performed")
@@ -228,17 +229,37 @@ class Compiler:
         # Mark reachable nodes
         self.graph.mark_reachable_required()
 
-        # Create output directory
+        # Clean and create output directory
+        import shutil
+
+        if self.output_path.exists():
+            shutil.rmtree(self.output_path)
         self.output_path.mkdir(parents=True, exist_ok=True)
 
         # Copy reachable Python source files
         copied = 0
+        # Check if any source file nodes are marked required
+        any_required = any(
+            self.graph.get_node(self._path_to_module(sf)) is not None
+            and self.graph.get_node(self._path_to_module(sf)).required
+            for sf in self.source_files
+            if self._path_to_module(sf) is not None
+        )
+
         for source_file in self.source_files:
             module_name = self._path_to_module(source_file)
             if module_name is None:
                 continue
-            node = self.graph.get_node(module_name)
-            if node is None or not node.required:
+
+            # If no nodes were marked reachable (e.g. entry point not found),
+            # copy everything conservatively
+            if not any_required:
+                required = True
+            else:
+                node = self.graph.get_node(module_name)
+                required = node is not None and node.required
+
+            if not required:
                 continue
 
             # Compute relative path from project root
@@ -252,13 +273,25 @@ class Compiler:
             dest.write_bytes(source_file.read_bytes())
             copied += 1
 
-        # Copy resources from include patterns
+        # Copy resources from include patterns (templates, locale, static, etc.)
         resource_count = self._copy_include_resources()
 
+        # Determine required third-party packages from import analysis
+        required_packages = self._resolve_required_packages()
+        if required_packages:
+            logger.info(
+                "Required third-party packages: %s",
+                ", ".join(sorted(required_packages)),
+            )
+            venv_copied = self._copy_venv_packages(required_packages)
+        else:
+            venv_copied = 0
+
         logger.info(
-            "VFS generated: %d modules, %d resources copied",
+            "VFS generated: %d modules, %d resources, %d venv packages",
             copied,
             resource_count,
+            venv_copied,
         )
 
     def generate_artifact(self) -> None:
@@ -375,6 +408,7 @@ class Compiler:
                     ".git",
                     "node_modules",
                     "target",
+                    "dist",
                 ]
             ):
                 continue
@@ -425,3 +459,232 @@ class Compiler:
             logger.warning("Failed to discover installed packages: %s", e)
 
         return packages
+
+    def _resolve_required_packages(self) -> set[str]:
+        """Resolve which third-party packages are required by the project.
+
+        Analyzes all import nodes in the graph, then maps imported module names
+        to package names by scanning the project's .venv site-packages directly.
+        """
+        import importlib.metadata
+        import importlib.util
+
+        required: set[str] = set()
+
+        # Build a set of all imported module top-level names from the graph
+        imported_modules: set[str] = set()
+        for node in self.graph.all_nodes().values():
+            module_name = node.id.split(":")[0] if ":" in node.id else node.id
+            if not module_name:
+                continue
+            top_level = module_name.split(".")[0]
+            imported_modules.add(top_level)
+
+        # Get stdlib module names to filter out
+        stdlib_modules = self._get_stdlib_modules()
+
+        # Find the .venv site-packages to resolve module -> package mapping
+        venv_source = self.project_root / ".venv"
+        site_packages = self._find_site_packages(venv_source)
+
+        if site_packages:
+            # Scan .dist-info directories for top_level.txt to map modules to packages
+            for dist_info in site_packages.glob("*.dist-info"):
+                top_level_file = dist_info / "top_level.txt"
+                if top_level_file.exists():
+                    try:
+                        pkg_modules = [
+                            line.strip()
+                            for line in top_level_file.read_text().splitlines()
+                            if line.strip()
+                        ]
+                        # If any of this package's modules are imported
+                        if any(m in imported_modules for m in pkg_modules):
+                            # Get package name from METADATA
+                            meta_file = dist_info / "METADATA"
+                            if meta_file.exists():
+                                for line in meta_file.read_text().splitlines():
+                                    if line.startswith("Name:"):
+                                        pkg_name = line.split(":", 1)[1].strip()
+                                        required.add(pkg_name)
+                                        break
+                    except Exception:
+                        pass
+        else:
+            # Fallback: use importlib.metadata from current environment
+            for top_level in imported_modules:
+                if top_level in stdlib_modules:
+                    continue
+                try:
+                    for dist in importlib.metadata.distributions():
+                        if dist.metadata.get("Name") is None:
+                            continue
+                        try:
+                            top_level_txt = dist.read_text("top_level.txt")
+                            if top_level_txt and top_level in top_level_txt.splitlines():
+                                required.add(dist.metadata["Name"])
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+        return required
+
+    def _get_stdlib_modules(self) -> set[str]:
+        """Get a set of standard library top-level module names."""
+        import sys
+
+        stdlib: set[str] = set()
+        stdlib_path = getattr(sys, "stdlib_dir", None)
+        if stdlib_path:
+            try:
+                for entry in Path(stdlib_path).iterdir():
+                    if entry.is_dir():
+                        stdlib.add(entry.name)
+                    elif entry.suffix == ".py":
+                        stdlib.add(entry.stem)
+            except Exception:
+                pass
+        # Always include common stdlib modules
+        stdlib.update({
+            "abc", "aifc", "argparse", "array", "ast", "asynchat", "asyncio",
+            "asyncore", "atexit", "base64", "bdb", "binascii", "binhex",
+            "bisect", "builtins", "bz2", "calendar", "cgi", "cgitb", "chunk",
+            "cmath", "cmd", "code", "codecs", "codeop", "collections",
+            "colorsys", "compileall", "concurrent", "configparser", "contextlib",
+            "contextvars", "copy", "copyreg", "cProfile", "crypt", "csv",
+            "ctypes", "curses", "dataclasses", "datetime", "dbm", "decimal",
+            "difflib", "dis", "distutils", "doctest", "email", "encodings",
+            "enum", "errno", "faulthandler", "fcntl", "filecmp", "fileinput",
+            "fnmatch", "fractions", "ftplib", "functools", "gc", "getopt",
+            "getpass", "gettext", "glob", "grp", "gzip", "hashlib", "heapq",
+            "hmac", "html", "http", "idlelib", "imaplib", "imghdr", "imp",
+            "importlib", "inspect", "io", "ipaddress", "itertools", "json",
+            "keyword", "lib2to3", "linecache", "locale", "logging", "lzma",
+            "mailbox", "mailcap", "marshal", "math", "mimetypes", "mmap",
+            "modulefinder", "multiprocessing", "netrc", "nis", "nntplib",
+            "numbers", "operator", "optparse", "os", "ossaudiodev", "parser",
+            "pathlib", "pdb", "pickle", "pickletools", "pipes", "pkgutil",
+            "platform", "plistlib", "poplib", "posix", "posixpath", "pprint",
+            "profile", "pstats", "pty", "pwd", "py_compile", "pyclbr",
+            "pydoc", "queue", "quopri", "random", "re", "readline", "reprlib",
+            "resource", "rlcompleter", "runpy", "sched", "secrets", "select",
+            "selectors", "shelve", "shlex", "shutil", "signal", "site",
+            "smtpd", "smtplib", "sndhdr", "socket", "socketserver", "spwd",
+            "sqlite3", "ssl", "stat", "statistics", "string", "stringprep",
+            "struct", "subprocess", "sunau", "symtable", "sys", "sysconfig",
+            "syslog", "tabnanny", "tarfile", "telnetlib", "tempfile", "termios",
+            "test", "textwrap", "threading", "timeit", "tkinter", "token",
+            "tokenize", "tomllib", "trace", "traceback", "tracemalloc", "tty",
+            "turtle", "turtledemo", "types", "typing", "unicodedata", "unittest",
+            "urllib", "uu", "uuid", "venv", "warnings", "wave", "weakref",
+            "webbrowser", "winreg", "winsound", "wsgiref", "xdrlib", "xml",
+            "xmlrpc", "zipapp", "zipfile", "zipimport", "zlib",
+            "_thread", "_io", "_collections_abc", "_frozen_importlib",
+        })
+        return stdlib
+
+    def _find_site_packages(self, venv_path: Path) -> Path | None:
+        """Find the site-packages directory inside a virtual environment."""
+        if not venv_path.exists():
+            return None
+        for sp_name in ("lib", "Lib"):
+            sp_candidate = venv_path / sp_name / "site-packages"
+            if sp_candidate.exists():
+                return sp_candidate
+        return None
+
+    def _copy_venv_packages(self, packages: set[str]) -> int:
+        """Copy required packages from .venv into dist/.venv.
+
+        Analyzes which .py files are actually needed and copies only those,
+        preserving directory structure. Skips __pycache__, .pyc, .dist-info,
+        tests, docs, and other non-runtime files.
+        """
+        venv_source = self.project_root / ".venv"
+        if not venv_source.exists():
+            logger.warning("No .venv found at %s, skipping package copy", venv_source)
+            return 0
+
+        venv_dest = self.output_path / ".venv"
+        venv_dest.mkdir(exist_ok=True)
+
+        # Find the site-packages directory in the source venv
+        site_packages = None
+        for sp_name in ("lib", "Lib"):
+            sp_candidate = venv_source / sp_name / "site-packages"
+            if sp_candidate.exists():
+                site_packages = sp_candidate
+                break
+
+        if site_packages is None:
+            logger.warning("Could not find site-packages in .venv")
+            return 0
+
+        copied = 0
+        # Copy each required package - only .py and native extension files
+        for pkg_name in packages:
+            pkg_dirs_found: list[Path] = []
+
+            # Exact match
+            if (site_packages / pkg_name).is_dir():
+                pkg_dirs_found.append(site_packages / pkg_name)
+
+            # Normalized name (PEP 503)
+            normalized = pkg_name.replace("-", "_").lower()
+            if (site_packages / normalized).is_dir():
+                pkg_dirs_found.append(site_packages / normalized)
+
+            # Check for .dist-info sibling
+            dist_info = site_packages / f"{normalized}.dist-info"
+            if dist_info.exists() and not pkg_dirs_found:
+                try:
+                    top_level_path = dist_info.parent / "top_level.txt"
+                    if top_level_path.exists():
+                        for line in top_level_path.read_text().splitlines():
+                            line = line.strip()
+                            if line and (site_packages / line).is_dir():
+                                pkg_dirs_found.append(site_packages / line)
+                except Exception:
+                    pass
+
+            for pkg_dir in pkg_dirs_found:
+                dest_pkg = venv_dest / pkg_dir.name
+                copied += self._copy_package_files(pkg_dir, dest_pkg)
+                logger.debug("Copied package: %s -> dist/.venv/%s", pkg_name, pkg_dir.name)
+
+        return copied
+
+    def _copy_package_files(self, src_pkg: Path, dst_pkg: Path) -> int:
+        """Copy only needed files from a package directory, preserving structure.
+
+        Copies .py files and native extensions (.so, .pyd, .dylib).
+        Skips __pycache__, .pyc, .dist-info, tests, docs, and metadata.
+        """
+        copied = 0
+        skip_dirs = {"__pycache__", "tests", "test", "docs", "doc", "examples"}
+
+        for file_path in src_pkg.rglob("*"):
+            if not file_path.is_file():
+                continue
+
+            parts = file_path.relative_to(src_pkg).parts
+            # Skip unwanted directories
+            if any(p in skip_dirs for p in parts[:-1]):
+                continue
+
+            rel_path = file_path.relative_to(src_pkg)
+            dest = dst_pkg / rel_path
+
+            # Only copy .py files and native extensions
+            suffix = file_path.suffix
+            if suffix == ".py":
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(file_path.read_bytes())
+                copied += 1
+            elif suffix in (".so", ".pyd", ".dylib"):
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(file_path.read_bytes())
+                copied += 1
+
+        return copied

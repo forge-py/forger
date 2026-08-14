@@ -92,13 +92,32 @@ def compile(  # noqa: A001  # type: ignore[name-defined]
                     compiler.process_forger_py(forger_py_path)
                     break
 
+        # Check for dist_dir override from config
+        import forger.api as api_module
+
+        ctx = api_module.get_context()
+        cfg = ctx.config
+        if cfg and cfg.dist_dir:
+            cfg_output = project_root / cfg.dist_dir
+            if cfg_output != output_dir:
+                output_dir = cfg_output
+                compiler.output_path = cfg_output
+                logger.info("Using dist_dir from config: %s", cfg_output)
+
+        # Clean dist directory before compiling
+        import shutil
+
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
+            logger.info("Cleaned dist directory: %s", output_dir)
+
         # Run analysis
         compiler.analyze()
 
         # Run optimizers
         compiler.run_optimizers()
 
-        # Generate VFS directory
+        # Generate VFS directory (includes venv package copying)
         compiler.generate_vfs()
 
         logger.info("Compilation complete: %s", output_dir)

@@ -46,6 +46,7 @@ class ForgerConfigDict(TypedDict, total=False):
     optimizers: NotRequired[dict[str, OptimizerOptions]]
     targets: NotRequired[list[str]]
     metadata: NotRequired[dict[str, str]]
+    dist_dir: NotRequired[str]
 
 
 @dataclass
@@ -60,6 +61,7 @@ class ForgerConfig:
         optimizers: Framework optimizer configurations.
         targets: Target platforms to build for.
         metadata: Arbitrary key-value metadata.
+        dist_dir: Output directory name (default: ``"dist"``).
     """
 
     entry: str = ""
@@ -69,6 +71,7 @@ class ForgerConfig:
     optimizers: dict[str, Any] = field(default_factory=dict)
     targets: list[str] = field(default_factory=list)
     metadata: dict[str, str] = field(default_factory=dict)
+    dist_dir: str = "dist"
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +162,7 @@ def defineConfig(  # noqa: N802
             optimizers=config.get("optimizers", {}),
             targets=config.get("targets", []),
             metadata={k: str(v) for k, v in config.get("metadata", {}).items()},
+            dist_dir=config.get("dist_dir", "dist"),
         )
 
     _get_context().set_config(cfg)
