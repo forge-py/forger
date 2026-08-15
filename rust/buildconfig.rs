@@ -95,12 +95,12 @@ impl BuildConfigResult {
 
 fn find_msvc_compiler() -> ToolCheck {
     // Try cl.exe via PATH
-    if let Some(cl_path) = find_in_path("cl.exe") {
+    if find_in_path("cl.exe").is_some() {
         match Command::new("cl.exe").output() {
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 // cl.exe prints version info to stderr
-                if let Some(version_start) = stderr.find("Microsoft") {
+                if stderr.contains("Microsoft") {
                     let version_line = stderr.lines().find(|l| l.contains("Version")).unwrap_or("");
                     let version = Some(version_line.trim().to_string());
                     return ToolCheck::Present { version };
@@ -200,10 +200,12 @@ fn find_xcode_select() -> ToolCheck {
 // Python detection (all platforms)
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn find_python() -> ToolCheck {
     check_tool_with_flag("python3", "--version")
 }
 
+#[allow(dead_code)]
 fn find_python_windows() -> ToolCheck {
     check_tool_with_flag("python", "--version")
 }
@@ -365,7 +367,8 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
     for dir in std::env::var_os("PATH")
         .as_ref()
         .map(|p| std::env::split_paths(p))
-        .unwrap_or_default()
+        .into_iter()
+        .flatten()
     {
         let candidate = dir.join(name);
         if candidate.exists() {
