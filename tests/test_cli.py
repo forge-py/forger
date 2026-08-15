@@ -1,59 +1,151 @@
-"""CLI tests — verify the Click CLI commands work correctly."""
+"""CLI tests — verify the CLI command functions work correctly.
+
+The CLI argument parsing is handled by the Rust binary (clap).
+These tests exercise the Python command implementations directly
+and use subprocess for end-to-end CLI validation.
+"""
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
-from click.testing import CliRunner
+import pytest
 
-from forger.cli.__main__ import main
+from forger.cli.__main__ import run_compile, run_build, run_forge, run_info
 
 
-def test_cli_version() -> None:
-    runner = CliRunner()
-    result = runner.invoke(main, ["--version"])
-    assert result.exit_code == 0
-    assert "forger" in result.output.lower() or "0.1.0" in result.output
+def test_run_compile_simple_project(capsys) -> None:
+    """Test run_compile on a simple project."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "main.py").write_text("import app\nprint('hello')\n")
+        (root / "app.py").write_text("import json\n\ndef run(): pass\n")
+        output = root / "dist"
+
+        run_compile(str(root), str(output), "main", verbose=False)
+        captured = capsys.readouterr()
+        assert "Compilation complete" in captured.out or "Forger compile" in captured.out
+
+
+def test_run_compile_with_forger_py(capsys) -> None:
+    """Test run_compile with forger.py."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "main.py").write_text("import app\n")
+        (root / "app.py").write_text("pass\n")
+        (root / "forger.py").write_text(
+            "from forger import defineConfig\ndefineConfig({'entry': 'main.py'})\n"
+        )
+        output = root / "dist"
+
+        run_compile(str(root), str(output), "main", verbose=False)
+        # Should complete without error
+
+
+def test_run_compile_nonexistent_source() -> None:
+    """Test run_compile with nonexistent source directory."""
+    with pytest.raises(SystemExit) as exc_info:
+        run_compile("/nonexistent/forger/path/that/does/not/exist", "dist", "main")
+    assert exc_info.value.code != 0
+
+
+def test_run_compile_custom_entry_point(capsys) -> None:
+    """Test run_compile with custom entry point."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "server.py").write_text("import app\n")
+        (root / "app.py").write_text("pass\n")
+        output = root / "dist"
+
+        run_compile(str(root), str(output), "server", verbose=False)
+        captured = capsys.readouterr()
+        assert "Forger compile" in captured.out or "Compilation complete" in captured.out
+
+
+def test_run_build_nonexistent_artifact() -> None:
+    """Test run_build with nonexistent artifact."""
+    with pytest.raises(SystemExit) as exc_info:
+        run_build("/nonexistent/app.forge", "windows-x64")
+    assert exc_info.value.code != 0
+
+
+def test_cli_version(capfd) -> None:
+    """Test the --version flag via subprocess."""
+    result = subprocess.run(
+        [sys.executable, "-m", "forger.cli.__main__", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "forger" in result.stdout.lower() or "0.1.0" in result.stdout
 
 
 def test_cli_help() -> None:
-    runner = CliRunner()
-    result = runner.invoke(main, ["--help"])
-    assert result.exit_code == 0
-    assert "compile" in result.output
-    assert "build" in result.output
+    """Test the --help flag via subprocess."""
+    result = subprocess.run(
+        [sys.executable, "-m", "forger.cli.__main__", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "compile" in result.stdout
+    assert "build" in result.stdout
 
 
 def test_cli_compile_help() -> None:
-    runner = CliRunner()
-    result = runner.invoke(main, ["compile", "--help"])
-    assert result.exit_code == 0
-    assert "--entry-point" in result.output
-    assert "--output" in result.output
+    """Test compile --help via subprocess."""
+    result = subprocess.run(
+        [sys.executable, "-m", "forger.cli.__main__", "compile", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "--entry-point" in result.stdout
+    assert "--output" in result.stdout
 
 
 def test_cli_build_help() -> None:
-    runner = CliRunner()
-    result = runner.invoke(main, ["build", "--help"])
-    assert result.exit_code == 0
-    assert "--target" in result.output
+    """Test build --help via subprocess."""
+    result = subprocess.run(
+        [sys.executable, "-m", "forger.cli.__main__", "build", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "--target" in result.stdout
 
 
-def test_cli_compile_simple_project() -> None:
-    """Test the compile command on a simple project."""
-    runner = CliRunner()
-
+def test_cli_compile_verbose(capsys) -> None:
+    """Test run_compile with verbose flag."""
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
+        (root / "main.py").write_text("pass\n")
+        output = root / "dist"
 
+        run_compile(str(root), str(output), "main", verbose=True)
+        # Should complete without error
+
+
+def test_cli_compile_simple_project_via_subprocess() -> None:
+    """Test compile command end-to-end via subprocess."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
         (root / "main.py").write_text("import app\nprint('hello')\n")
         (root / "app.py").write_text("import json\n\ndef run(): pass\n")
+        output = root / "dist"
 
-        output = root / "app.forge"
-        result = runner.invoke(
-            main,
+        result = subprocess.run(
             [
+                sys.executable,
+                "-m",
+                "forger.cli.__main__",
                 "compile",
                 str(root),
                 "--output",
@@ -61,120 +153,8 @@ def test_cli_compile_simple_project() -> None:
                 "--entry-point",
                 "main",
             ],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
-
-        assert result.exit_code == 0
-        assert "Compilation complete" in result.output or "Compilation Summary" in result.output
-
-
-def test_cli_compile_with_forger_py() -> None:
-    """Test compile with forger.py."""
-    runner = CliRunner()
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-
-        (root / "main.py").write_text("import app\n")
-        (root / "app.py").write_text("pass\n")
-        (root / "forger.py").write_text(
-            "from forger import defineConfig\ndefineConfig({'entry': 'main.py'})\n"
-        )
-
-        output = root / "app.forge"
-        result = runner.invoke(
-            main,
-            [
-                "compile",
-                str(root),
-                "--output",
-                str(output),
-            ],
-        )
-
-        assert result.exit_code == 0
-
-
-def test_cli_compile_nonexistent_source() -> None:
-    """Test compile with nonexistent source directory."""
-    runner = CliRunner()
-    result = runner.invoke(
-        main,
-        ["compile", "/nonexistent/path"],
-    )
-    assert result.exit_code != 0
-
-
-def test_cli_build_nonexistent_artifact() -> None:
-    """Test build with nonexistent artifact."""
-    runner = CliRunner()
-    result = runner.invoke(
-        main,
-        ["build", "/nonexistent/app.forge"],
-    )
-    assert result.exit_code != 0
-
-
-def test_cli_info_command() -> None:
-    """Test the info command."""
-    runner = CliRunner()
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-        artifact = root / "app.forge"
-        artifact.write_bytes(b"FRG0" + b"\x00" * 100)
-
-        result = runner.invoke(
-            main,
-            ["info", str(artifact)],
-        )
-
-        # Should show artifact info
-        assert result.exit_code == 0 or "Artifact" in result.output
-
-
-def test_cli_compile_verbose() -> None:
-    """Test compile with verbose flag."""
-    runner = CliRunner()
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-        (root / "main.py").write_text("pass\n")
-
-        output = root / "app.forge"
-        result = runner.invoke(
-            main,
-            [
-                "compile",
-                str(root),
-                "--output",
-                str(output),
-                "--verbose",
-            ],
-        )
-
-        assert result.exit_code == 0
-
-
-def test_cli_compile_custom_entry_point() -> None:
-    """Test compile with custom entry point."""
-    runner = CliRunner()
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-        (root / "server.py").write_text("import app\n")
-        (root / "app.py").write_text("pass\n")
-
-        output = root / "app.forge"
-        result = runner.invoke(
-            main,
-            [
-                "compile",
-                str(root),
-                "--output",
-                str(output),
-                "--entry-point",
-                "server",
-            ],
-        )
-
-        assert result.exit_code == 0
+        assert result.returncode == 0

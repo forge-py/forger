@@ -258,7 +258,20 @@ def _parse_compile_args(args: list[str]) -> dict[str, object]:
     i = 0
     while i < len(args):
         a = args[i]
-        if a == "--output" or a == "-o":
+        if a == "--help" or a == "-h":
+            print(
+                "Usage: forger compile [SOURCE] [OPTIONS]\n"
+                "\n"
+                "Options:\n"
+                "  -o, --output TEXT        Output path for VFS artifact (default: dist)\n"
+                "  -e, --entry-point TEXT   Entry point module (default: main)\n"
+                "  --venv TEXT              Virtual environment path\n"
+                "  --forger-py TEXT         Path to forger.py config\n"
+                "  -v, --verbose            Enable verbose output\n"
+                "  -h, --help               Show this message\n"
+            )
+            sys.exit(0)
+        elif a == "--output" or a == "-o":
             i += 1
             result["output"] = args[i] if i < len(args) else "dist"
         elif a == "--entry-point" or a == "-e":
@@ -308,7 +321,18 @@ def _parse_build_args(args: list[str]) -> dict[str, object]:
     i = 0
     while i < len(args):
         a = args[i]
-        if a == "--target" or a == "-t":
+        if a == "--help" or a == "-h":
+            print(
+                "Usage: forger build ARTIFACT [OPTIONS]\n"
+                "\n"
+                "Options:\n"
+                "  -t, --target TEXT   Target platform (default: windows-x64)\n"
+                "  -o, --output TEXT   Output directory\n"
+                "  -v, --verbose       Enable verbose output\n"
+                "  -h, --help          Show this message\n"
+            )
+            sys.exit(0)
+        elif a == "--target" or a == "-t":
             i += 1
             result["target"] = args[i] if i < len(args) else "windows-x64"
         elif a == "--output" or a == "-o":
@@ -509,59 +533,9 @@ Options:
     )
 
 
-# ---------------------------------------------------------------------------
-# Click CLI group (for test compatibility)
-# ---------------------------------------------------------------------------
-
-import click
-
-from forger import __version__
-
-
-@click.group()
-@click.version_option(version=__version__, prog_name="forger")
-def main():
-    """Forger — Python application compiler and bundler."""
-    pass
-
-
-@main.command(name="compile")
-@click.argument("source", default=".")
-@click.option("-o", "--output", default="dist", help="Output path for VFS artifact.")
-@click.option("-e", "--entry-point", default="main", help="Entry point module.")
-@click.option("--venv", default=None, help="Virtual environment path.")
-@click.option("--forger-py", default=None, help="Path to forger.py config.")
-@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output.")
-def compile_(source, output, entry_point, venv, forger_py, verbose):
-    """Analyze and compile a Python project into a VFS directory."""
-    run_compile(source, output, entry_point, venv, forger_py, verbose)
-
-
-@main.command()
-@click.argument("vfs_dir", default="dist")
-@click.option("-o", "--output", default="app.forge", help="Output .forge artifact path.")
-@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output.")
-def forge(vfs_dir, output, verbose):
-    """Package the VFS directory into a .forge artifact."""
-    run_forge(vfs_dir, output, verbose)
-
-
-@main.command()
-@click.argument("artifact")
-@click.option("-t", "--target", default="windows-x64", help="Target platform.")
-@click.option("-o", "--output", default=None, help="Output directory.")
-@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output.")
-def build(artifact, target, output, verbose):
-    """Build a platform-specific executable from a .forge artifact."""
-    run_build(artifact, target, output, verbose)
-
-
-@main.command()
-@click.argument("artifact")
-def info(artifact):
-    """Show information about a .forge artifact."""
-    run_info(artifact)
-
-
 if __name__ == "__main__":
     run()
+
+
+# Alias for test compatibility — tests import `main` but the entry point is `run`
+main = run

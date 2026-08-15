@@ -11,6 +11,7 @@ use std::fmt::Write;
 use std::path::PathBuf;
 
 use hashbrown::HashMap as FastHashMap;
+use pyo3::prelude::*;
 use serde::{Serialize, Deserialize};
 
 use crate::filesystem::FileType;
@@ -19,6 +20,7 @@ use crate::result::{ForgerError, ForgerResult};
 /// Types of nodes in the dependency graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[pyclass]
 pub enum NodeType {
     PythonModule,
     PythonPackage,
@@ -56,6 +58,7 @@ impl fmt::Display for NodeType {
 /// Types of edges (dependency relationships) in the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[pyclass]
 pub enum EdgeType {
     Import,
     FromImport,
@@ -68,6 +71,7 @@ pub enum EdgeType {
     EntryPointDependency,
     StdlibDependency,
     Indirect,
+    UnoptimizedDependency,
     Custom(String),
 }
 
@@ -85,6 +89,7 @@ impl fmt::Display for EdgeType {
             EdgeType::EntryPointDependency => write!(f, "entry_point"),
             EdgeType::StdlibDependency => write!(f, "stdlib"),
             EdgeType::Indirect => write!(f, "indirect"),
+            EdgeType::UnoptimizedDependency => write!(f, "unoptimized"),
             EdgeType::Custom(label) => write!(f, "custom:{label}"),
         }
     }
@@ -133,6 +138,8 @@ pub struct DependencyNode {
     pub conservative: bool,
     /// Target platform specificity (e.g., "windows-x64", "linux-arm64", None = universal).
     pub target: Option<String>,
+    /// Whether this node is unoptimized (bypasses tree-shaking).
+    pub unoptimized: bool,
     /// Metadata key-value pairs for extended information.
     pub metadata: HashMap<String, String>,
     /// Optional content stored with this node.
@@ -151,6 +158,7 @@ impl DependencyNode {
             required: false,
             conservative: false,
             target: None,
+            unoptimized: false,
             metadata: HashMap::new(),
             content: None,
         }
@@ -360,9 +368,13 @@ impl DependencyGraph {
     }
 
     /// Mark all reachable nodes as required.
+    /// Unoptimized nodes are always marked required (they bypass tree-shaking).
     pub fn mark_reachable_required(&mut self) {
-        let reachable = self.find_reachable();
+        let mut reachable = self.find_reachable();
         for (id, node) in &mut self.nodes {
+            if node.unoptimized {
+                reachable.insert(id.clone());
+            }
             node.required = reachable.contains(id);
         }
     }
@@ -426,6 +438,63 @@ impl DependencyGraph {
         self.edges_from
             .retain(|id, _| reachable.contains(id));
         self.edges_to.retain(|id, _| reachable.contains(id));
+    }
+
+    /// Check if a node is dead (not reachable and not unoptimized).
+    pub fn is_dead(&self, node_id: &str) -> bool {
+        let node = self.nodes.get(node_id);
+        if node.is_none() {
+            return true;
+        }
+        if node.unwrap().unoptimized {
+            return false;
+        }
+        !self.find_reachable().contains(node_id)
+    }
+
+    /// Return all dead (unreachable and not unoptimized) node IDs.
+    pub fn find_dead_nodes(&self) -> Vec<String> {
+        let reachable = self.find_reachable();
+        let mut dead = Vec::new();
+        for (id, node) in &self.nodes {
+            if node.unoptimized {
+                continue;
+            }
+            if !reachable.contains(id) {
+                dead.push(id.clone());
+            }
+        }
+        dead
+    }
+
+    /// Remove a node from the graph. Returns true if the node existed.
+    pub fn delete_node(&mut self, node_id: &str) -> bool {
+        if self.nodes.remove(node_id).is_none() {
+            return false;
+        }
+        self.edges_from.remove(node_id);
+        self.edges_to.remove(node_id);
+        self.entry_points.retain(|ep| ep != node_id);
+        true
+    }
+
+    /// Return all nodes marked as unoptimized.
+    pub fn get_unoptimized_nodes(&self) -> Vec<&DependencyNode> {
+        self.nodes.values().filter(|n| n.unoptimized).collect()
+    }
+
+    /// Check if any nodes are marked unoptimized.
+    pub fn has_unoptimized_nodes(&self) -> bool {
+        self.nodes.values().any(|n| n.unoptimized)
+    }
+
+    /// Return owned nodes filtered by type.
+    pub fn nodes_by_type_owned(&self, node_type: NodeType) -> Vec<DependencyNode> {
+        self.nodes
+            .values()
+            .filter(|n| n.node_type == node_type)
+            .cloned()
+            .collect()
     }
 
     /// Generate diagnostic information for a node.
