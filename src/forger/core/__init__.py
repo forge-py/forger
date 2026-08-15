@@ -66,6 +66,8 @@ class DependencyNode:
     required: bool = False
     conservative: bool = False
     target: str | None = None
+    unoptimized: bool = False
+    content: str | None = None
 
     @classmethod
     def new(cls, node_id: str, node_type: str) -> DependencyNode:
@@ -74,6 +76,19 @@ class DependencyNode:
     def with_metadata(self, key: str, value: str) -> DependencyNode:
         self.metadata[key] = value
         return self
+
+    def mark_unoptimized(self) -> DependencyNode:
+        """Mark this node as an unoptimized dependency (bypasses tree-shaking)."""
+        self.unoptimized = True
+        return self
+
+    def set_content(self, content: str) -> None:
+        """Set the source content of this node."""
+        self.content = content
+
+    def get_content(self) -> str | None:
+        """Get the source content of this node."""
+        return self.content
 
 
 class NodeType:
@@ -107,6 +122,7 @@ class EdgeType:
     EntryPointDependency = "entry_point"
     StdlibDependency = "stdlib"
     Indirect = "indirect"
+    UnoptimizedDependency = "unoptimized"
 
 
 class DependencyGraph:
@@ -173,7 +189,10 @@ class DependencyGraph:
 
     def mark_reachable_required(self) -> None:
         reachable = self.find_reachable()
+        # Unoptimized nodes are always required — they bypass tree-shaking
         for node in self._nodes.values():
+            if node.unoptimized:
+                reachable.add(node.id)
             node.required = node.id in reachable
 
     def prune_unreachable(self) -> None:
@@ -208,3 +227,46 @@ class DependencyGraph:
                 self.add_edge(edge)
         for ep in other._entry_points:
             self.add_entry_point(ep)
+
+    def get_unoptimized_nodes(self) -> list[DependencyNode]:
+        """Return all nodes marked as unoptimized (bypass tree-shaking)."""
+        return [n for n in self._nodes.values() if n.unoptimized]
+
+    def has_unoptimized_nodes(self) -> bool:
+        """Check if any nodes are marked unoptimized."""
+        return any(n.unoptimized for n in self._nodes.values())
+
+    def is_dead(self, node_id: str) -> bool:
+        """Check if a node is dead (not reachable and not unoptimized)."""
+        node = self._nodes.get(node_id)
+        if node is None:
+            return True
+        if node.unoptimized:
+            return False
+        return node_id not in self.find_reachable()
+
+    def find_dead_nodes(self) -> list[str]:
+        """Return all dead (unreachable) node IDs."""
+        reachable = self.find_reachable()
+        # Unoptimized nodes are never considered dead
+        dead: list[str] = []
+        for node_id, node in self._nodes.items():
+            if node.unoptimized:
+                continue
+            if node_id not in reachable:
+                dead.append(node_id)
+        return dead
+
+    def get_node_mut(self, node_id: str) -> DependencyNode | None:
+        """Get a mutable reference to a node by ID."""
+        return self._nodes.get(node_id)
+
+    def delete_node(self, node_id: str) -> bool:
+        """Remove a node from the graph. Returns True if the node existed."""
+        if node_id not in self._nodes:
+            return False
+        del self._nodes[node_id]
+        self._edges_from.pop(node_id, None)
+        self._edges_to.pop(node_id, None)
+        self._entry_points = [ep for ep in self._entry_points if ep != node_id]
+        return True

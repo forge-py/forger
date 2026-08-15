@@ -11,12 +11,13 @@ use std::time::SystemTime;
 use glob::{glob, Pattern as GlobPattern};
 use rayon::prelude::*;
 
+use serde::{Serialize, Deserialize};
 use crate::hash::{content_hash, FileHash, HashValue};
 use crate::pathutil::normalize_path;
 use crate::result::{ForgerError, ForgerResult};
 
 /// File type classification for dependency graph nodes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FileType {
     PythonSource,
     PythonBytecode,
@@ -277,6 +278,15 @@ impl FileDiscovery {
 
         entries.push(file_entry);
         Ok(())
+    }
+
+    /// Run parallel discovery using worker-based directory traversal.
+    ///
+    /// Currently delegates to sequential discovery for correctness.
+    /// The parallel implementation requires more careful threading
+    /// and will be added in a follow-up.
+    pub fn discover_parallel(&self) -> ForgerResult<Vec<FileEntry>> {
+        self.discover()
     }
 
     /// Run parallel hash computation on discovered entries.

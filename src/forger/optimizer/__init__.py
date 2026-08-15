@@ -58,6 +58,7 @@ class PluginContext:
     _retain_modules: set[str] = field(default_factory=set)
     _retain_resources: set[str] = field(default_factory=set)
     _dynamic_symbols: set[str] = field(default_factory=set)
+    _unoptimized_dependencies: set[str] = field(default_factory=set)
     _source_files: list[Path] = field(default_factory=list)
 
     @property
@@ -139,6 +140,94 @@ class PluginContext:
         """Check if a symbol is in the retain set."""
         return symbol_id in self._retain_symbols
 
+    # -- Node content API --
+
+    def get_node_content(self, node_id: str) -> str | None:
+        """Read the source content of a graph node.
+
+        Returns None if the node does not exist or has no content.
+        """
+        node = self.graph.get_node(node_id)
+        if node is None:
+            return None
+        return node.get_content()
+
+    def set_node_content(self, node_id: str, content: str) -> None:
+        """Modify the source content of a graph node."""
+        node = self.graph.get_node_mut(node_id)
+        if node is not None:
+            node.set_content(content)
+
+    # -- Dead code API --
+
+    def is_dead(self, node_id: str) -> bool:
+        """Check if a node is dead (unreachable and not unoptimized)."""
+        return self.graph.is_dead(node_id)
+
+    def find_dead_nodes(self) -> list[str]:
+        """Return all dead (unreachable) node IDs."""
+        return self.graph.find_dead_nodes()
+
+    def delete_node(self, node_id: str) -> bool:
+        """Remove a node from the graph. Returns True if it existed."""
+        return self.graph.delete_node(node_id)
+
+    # -- Unoptimized dependency API --
+
+    def add_unoptimized_dependency(self, node_id: str, node_type: str | None = None) -> None:
+        """Declare an unoptimized dependency that bypasses tree-shaking.
+
+        Plugins use this to add modules or resources that must be retained
+        regardless of reachability analysis. The node will be marked as
+        ``unoptimized=True`` so it survives pruning passes.
+
+        Args:
+            node_id: The module or resource identifier.
+            node_type: Optional node type (defaults to Resource for paths,
+                       PythonModule for dotted identifiers).
+        """
+        from forger.core import DependencyEdge, DependencyNode, EdgeType, NodeType  # noqa: F401
+
+        self._unoptimized_dependencies.add(node_id)
+
+        # Ensure the node exists and is marked unoptimized
+        existing = self.graph.get_node(node_id)
+        if existing is not None:
+            existing.unoptimized = True
+            return
+
+        # Infer node type from the id format
+        if node_type is not None:
+            inferred_type = node_type
+        elif "/" in node_id or "\\" in node_id or node_id.endswith((".html", ".css", ".js", ".json", ".png", ".jpg", ".svg")):
+            inferred_type = NodeType.Resource
+        else:
+            inferred_type = NodeType.PythonModule
+
+        self.add_node(DependencyNode.new(node_id, inferred_type).mark_unoptimized())
+
+    def add_unoptimized_resource(self, resource_path: str, source_module: str | None = None) -> None:
+        """Add a resource file as unoptimized dependency.
+
+        Shorthand for ``add_unoptimized_dependency`` with Resource type.
+        Also creates a ResourceDependency edge from the source module if given.
+        """
+        from forger.core import DependencyEdge, DependencyNode, EdgeType, NodeType
+
+        self._unoptimized_dependencies.add(resource_path)
+
+        existing = self.graph.get_node(resource_path)
+        if existing is None:
+            self.add_node(DependencyNode.new(resource_path, NodeType.Resource)
+                          .mark_unoptimized()
+                          .with_metadata("source", "plugin"))
+        else:
+            existing.unoptimized = True
+
+        if source_module:
+            edge = DependencyEdge.new(source_module, resource_path, EdgeType.UnoptimizedDependency)
+            self.add_edge(edge)
+
     # -- Package detection --
 
     def has_package(self, name: str) -> bool:
@@ -166,6 +255,10 @@ class PluginContext:
     @property
     def dynamic_symbols(self) -> set[str]:
         return set(self._dynamic_symbols)
+
+    @property
+    def unoptimized_dependencies(self) -> set[str]:
+        return set(self._unoptimized_dependencies)
 
 
 # ---------------------------------------------------------------------------

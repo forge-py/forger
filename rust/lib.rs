@@ -14,9 +14,12 @@
 pub mod buildconfig;
 pub mod cache;
 pub mod cli;
+pub mod cpython;
 pub mod depgraph;
 pub mod filesystem;
 pub mod forge;
+pub mod graphbuilder;
+pub mod graphstore;
 pub mod hash;
 pub mod module;
 pub mod pathutil;
@@ -26,8 +29,11 @@ pub mod vfs;
 // Re-export core types for convenient access
 pub use buildconfig::{check_build_config, BuildConfigResult, ToolCheck};
 pub use cache::Cache;
+pub use cpython::{CpythonModuleRegistry, CpythonAnalysisResult, CpythonBuildConfig, CpythonSourceAnalyzer};
 pub use depgraph::{DependencyGraph, DependencyNode, DependencyEdge, NodeType, EdgeType, EdgeProvenance};
 pub use filesystem::{FileDiscovery, FileEntry, DiscoveryOptions};
+pub use graphbuilder::GraphBuilder;
+pub use graphstore::GraphStore;
 pub use forge::{ForgeArtifact, ForgeManifest, ForgeBuilder};
 pub use hash::{content_hash, content_hash_reader, HashValue};
 pub use module::{ModuleResolver, ModuleSpec};
@@ -45,8 +51,19 @@ fn content_hash_bytes_py(data: &[u8]) -> PyResult<String> {
     Ok(hash::content_hash_bytes(data).0)
 }
 
+/// Check build configuration for the given target.
+#[pyfunction]
+fn check_build_config_py(target: String) -> PyResult<BuildConfigResult> {
+    check_build_config(&target).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
 #[pymodule]
 fn forger(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction_bound!(content_hash_bytes_py)(m).unwrap())?;
+    m.add_function(wrap_pyfunction_bound!(check_build_config_py)(m).unwrap())?;
+    m.add_class::<BuildConfigResult>()?;
+    m.add_class::<CpythonModuleRegistry>()?;
+    m.add_class::<CpythonAnalysisResult>()?;
+    m.add_class::<CpythonBuildConfig>()?;
     Ok(())
 }

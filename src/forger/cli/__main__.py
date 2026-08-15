@@ -41,6 +41,17 @@ def run_compile(
     print(f"Entry point: {entry_point}")
 
     project_root = Path(source).resolve()
+    if not project_root.exists() or not project_root.is_dir():
+        print(f"Error: source directory does not exist: {project_root}", file=sys.stderr)
+        sys.exit(1)
+    entry_file = project_root / (entry_point + ".py")
+    if not entry_file.exists():
+        # Try without .py extension (package mode)
+        entry_pkg = project_root / entry_point
+        if not entry_pkg.is_dir():
+            print(f"Error: entry point not found: {entry_point}", file=sys.stderr)
+            sys.exit(1)
+
     output_path = Path(output)
     if not output_path.is_absolute():
         output_dir = project_root / output_path
@@ -128,13 +139,18 @@ def run_build(
     """Build a platform-specific executable from a .forge artifact."""
     setup_logging(verbose)
 
+    artifact_path = Path(artifact).resolve()
+    if not artifact_path.is_file():
+        print(f"Error: artifact does not exist: {artifact_path}", file=sys.stderr)
+        sys.exit(1)
+
     logger.info("Forger build: %s -> %s", artifact, target)
 
     try:
         from forger.builder import Builder
 
         builder = Builder(
-            artifact_path=Path(artifact).resolve(),
+            artifact_path=artifact_path,
             target=target,
             output_dir=Path(output).resolve() if output else None,
         )
@@ -222,6 +238,8 @@ def run() -> None:
         run_info(**parsed)
     elif command == "build-config":
         _run_build_config(args[1:])
+    elif command == "cpython":
+        _run_cpython(args[1:])
     else:
         print(f"Error: unknown command '{command}'", file=sys.stderr)
         print_usage()
@@ -385,6 +403,86 @@ def _build_config_check_python(target: str) -> None:
         sys.exit(1)
 
 
+def _run_cpython(args: list[str]) -> None:
+    if not args or args[0] not in ("analyze", "build-config"):
+        print("Error: unknown cpython subcommand. Use 'analyze' or 'build-config'.", file=sys.stderr)
+        sys.exit(1)
+
+    subcommand = args[0]
+
+    if subcommand == "analyze":
+        _cpython_analyze(args[1:])
+    elif subcommand == "build-config":
+        _cpython_build_config(args[1:])
+
+
+def _cpython_analyze(args: list[str]) -> None:
+    modules = []
+    version = "3.12"
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--version":
+            i += 1
+            version = args[i] if i < len(args) else "3.12"
+        elif not a.startswith("-"):
+            modules.append(a)
+        i += 1
+
+    if not modules:
+        print("Error: no modules specified. Provide one or more module names.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        from forger_core import CpythonModuleRegistry  # type: ignore[import-not-found, import-untyped, missing-import]
+
+        ver_parts = version.split(".")
+        major = int(ver_parts[0]) if len(ver_parts) > 0 else 3
+        minor = int(ver_parts[1]) if len(ver_parts) > 1 else 12
+        registry = CpythonModuleRegistry.new((major, minor))
+        analysis = registry.analyze_required_sources(modules)
+        print(analysis.format_report())
+    except ImportError:
+        print("Error: Rust core not available. Install with 'uv sync' and rebuild.")
+        sys.exit(1)
+
+
+def _cpython_build_config(args: list[str]) -> None:
+    modules = []
+    target = "windows-x64"
+    version = "3.12"
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--target" or a == "-t":
+            i += 1
+            target = args[i] if i < len(args) else "windows-x64"
+        elif a == "--version":
+            i += 1
+            version = args[i] if i < len(args) else "3.12"
+        elif not a.startswith("-"):
+            modules.append(a)
+        i += 1
+
+    if not modules:
+        print("Error: no modules specified. Provide one or more module names.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        from forger_core import CpythonModuleRegistry, CpythonBuildConfig  # type: ignore[import-not-found, import-untyped, missing-import]
+
+        ver_parts = version.split(".")
+        major = int(ver_parts[0]) if len(ver_parts) > 0 else 3
+        minor = int(ver_parts[1]) if len(ver_parts) > 1 else 12
+        registry = CpythonModuleRegistry.new((major, minor))
+        analysis = registry.analyze_required_sources(modules)
+        build_cfg = CpythonBuildConfig.from_analysis(analysis, target, version)
+        print(build_cfg.format_report())
+    except ImportError:
+        print("Error: Rust core not available. Install with 'uv sync' and rebuild.")
+        sys.exit(1)
+
+
 def print_usage() -> None:
     """Print CLI usage information."""
     print(
@@ -400,12 +498,69 @@ Commands:
   info           Show information about a .forge artifact
   build-config   Build-config subcommands
     check        Check if required build tools are present on the machine
+  cpython        CPython module analysis and minimal build configuration
+    analyze      Analyze which CPython modules are required
+    build-config Generate a minimal CPython build configuration
 
 Options:
   -h, --help     Print help
   -V, --version  Print version
   -v, --verbose  Enable verbose output"""
     )
+
+
+# ---------------------------------------------------------------------------
+# Click CLI group (for test compatibility)
+# ---------------------------------------------------------------------------
+
+import click
+
+from forger import __version__
+
+
+@click.group()
+@click.version_option(version=__version__, prog_name="forger")
+def main():
+    """Forger — Python application compiler and bundler."""
+    pass
+
+
+@main.command(name="compile")
+@click.argument("source", default=".")
+@click.option("-o", "--output", default="dist", help="Output path for VFS artifact.")
+@click.option("-e", "--entry-point", default="main", help="Entry point module.")
+@click.option("--venv", default=None, help="Virtual environment path.")
+@click.option("--forger-py", default=None, help="Path to forger.py config.")
+@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output.")
+def compile_(source, output, entry_point, venv, forger_py, verbose):
+    """Analyze and compile a Python project into a VFS directory."""
+    run_compile(source, output, entry_point, venv, forger_py, verbose)
+
+
+@main.command()
+@click.argument("vfs_dir", default="dist")
+@click.option("-o", "--output", default="app.forge", help="Output .forge artifact path.")
+@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output.")
+def forge(vfs_dir, output, verbose):
+    """Package the VFS directory into a .forge artifact."""
+    run_forge(vfs_dir, output, verbose)
+
+
+@main.command()
+@click.argument("artifact")
+@click.option("-t", "--target", default="windows-x64", help="Target platform.")
+@click.option("-o", "--output", default=None, help="Output directory.")
+@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output.")
+def build(artifact, target, output, verbose):
+    """Build a platform-specific executable from a .forge artifact."""
+    run_build(artifact, target, output, verbose)
+
+
+@main.command()
+@click.argument("artifact")
+def info(artifact):
+    """Show information about a .forge artifact."""
+    run_info(artifact)
 
 
 if __name__ == "__main__":

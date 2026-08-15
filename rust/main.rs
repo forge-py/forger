@@ -6,8 +6,20 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use forger_core::cli::{Cli, Commands, BuildConfigCommands};
+use forger_core::cli::{Cli, Commands, BuildConfigCommands, CpythonCommands};
 use forger_core::check_build_config;
+use forger_core::{CpythonModuleRegistry, CpythonBuildConfig};
+
+fn parse_cpython_version(version: &str) -> Option<(u32, u32)> {
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() == 2 {
+        let major = parts[0].parse::<u32>().ok()?;
+        let minor = parts[1].parse::<u32>().ok()?;
+        Some((major, minor))
+    } else {
+        None
+    }
+}
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -46,6 +58,25 @@ fn main() -> ExitCode {
                     ExitCode::from(2)
                 }
             }
+        }
+        Commands::Cpython(CpythonCommands::Analyze(args)) => {
+            let version = parse_cpython_version(&args.version).unwrap_or((3, 12));
+            let registry = CpythonModuleRegistry::new(version);
+            let analysis = registry.analyze_required_sources_inner(&args.modules);
+            println!("{}", analysis.format_report());
+            ExitCode::SUCCESS
+        }
+        Commands::Cpython(CpythonCommands::BuildConfig(args)) => {
+            let version = parse_cpython_version(&args.version).unwrap_or((3, 12));
+            let registry = CpythonModuleRegistry::new(version);
+            let analysis = registry.analyze_required_sources_inner(&args.modules);
+            let build_cfg = CpythonBuildConfig::from_analysis_inner(
+                &analysis,
+                &args.target,
+                &args.version,
+            );
+            println!("{}", build_cfg.format_report());
+            ExitCode::SUCCESS
         }
     }
 }

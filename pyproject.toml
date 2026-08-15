@@ -5,7 +5,7 @@ description = "A Python application compiler, analyzer, bundler, and cross-platf
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Forger Team" }]
-dependencies = []
+dependencies = ["click>=8.0"]
 
 [project.scripts]
 forger = "forger.cli.__main__:run"

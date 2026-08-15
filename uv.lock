@@ -45,8 +45,8 @@ wheels = [
 ]
 
 [[package]]
-name = "forger"
-version = "0.1.0"
+name = "forger-py"
+version = "0.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -65,7 +65,7 @@ typing = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "click", specifier = ">=8.1.7" }]
+requires-dist = [{ name = "click", specifier = ">=8.0" }]
 
 [package.metadata.requires-dev]
 lint = [{ name = "ruff", specifier = ">=0.16.3" }]

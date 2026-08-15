@@ -11,12 +11,14 @@ use std::fmt::Write;
 use std::path::PathBuf;
 
 use hashbrown::HashMap as FastHashMap;
+use serde::{Serialize, Deserialize};
 
 use crate::filesystem::FileType;
 use crate::result::{ForgerError, ForgerResult};
 
 /// Types of nodes in the dependency graph.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum NodeType {
     PythonModule,
     PythonPackage,
@@ -52,7 +54,8 @@ impl fmt::Display for NodeType {
 }
 
 /// Types of edges (dependency relationships) in the graph.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EdgeType {
     Import,
     FromImport,
@@ -88,7 +91,7 @@ impl fmt::Display for EdgeType {
 }
 
 /// Provenance information for an edge — why this dependency exists.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdgeProvenance {
     /// Source file and line number where the dependency was discovered.
     pub source: Option<(String, usize)>,
@@ -110,7 +113,7 @@ impl fmt::Display for EdgeProvenance {
 }
 
 /// A node in the dependency graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyNode {
     /// Unique identifier (e.g., module name, file path, resource key).
     pub id: String,
@@ -132,6 +135,8 @@ pub struct DependencyNode {
     pub target: Option<String>,
     /// Metadata key-value pairs for extended information.
     pub metadata: HashMap<String, String>,
+    /// Optional content stored with this node.
+    pub content: Option<String>,
 }
 
 impl DependencyNode {
@@ -147,6 +152,7 @@ impl DependencyNode {
             conservative: false,
             target: None,
             metadata: HashMap::new(),
+            content: None,
         }
     }
 
@@ -159,10 +165,25 @@ impl DependencyNode {
         self.metadata.insert(key.into(), value.into());
         self
     }
+
+    /// Set the content of this node.
+    pub fn set_content(&mut self, content: String) {
+        self.content = Some(content);
+    }
+
+    /// Get an immutable reference to the content of this node.
+    pub fn get_content(&self) -> Option<&String> {
+        self.content.as_ref()
+    }
+
+    /// Get a mutable reference to the content of this node.
+    pub fn get_content_mut(&mut self) -> Option<&mut String> {
+        self.content.as_mut()
+    }
 }
 
 /// An edge representing a dependency relationship.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyEdge {
     /// Source node ID.
     pub from: String,
@@ -193,7 +214,8 @@ impl DependencyEdge {
 /// The main dependency graph structure.
 ///
 /// Uses hashbrown HashMaps for performance-critical lookups.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct DependencyGraph {
     /// Nodes indexed by ID.
     nodes: FastHashMap<String, DependencyNode>,
@@ -308,6 +330,11 @@ impl DependencyGraph {
     /// Get graph-level metadata.
     pub fn get_metadata(&self, key: &str) -> Option<&String> {
         self.metadata.get(key)
+    }
+
+    /// Get an iterator over all metadata entries.
+    pub fn get_metadata_entries(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.metadata.iter()
     }
 
     /// Find all reachable nodes from entry points using BFS.

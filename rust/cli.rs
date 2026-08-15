@@ -36,12 +36,54 @@ pub enum Commands {
     /// Build-config subcommands.
     #[command(subcommand)]
     BuildConfig(BuildConfigCommands),
+
+    /// CPython module analysis and minimal build configuration.
+    #[command(subcommand)]
+    Cpython(CpythonCommands),
 }
 
 #[derive(Subcommand, Debug)]
 pub enum BuildConfigCommands {
     /// Check if required build tools (MSVC, etc.) are present on the machine.
     Check(CheckArgs),
+}
+
+/// CPython analysis subcommands.
+#[derive(Subcommand, Debug)]
+pub enum CpythonCommands {
+    /// Analyze which CPython modules are required for a given set of modules.
+    Analyze(CpythonAnalyzeArgs),
+
+    /// Generate a minimal CPython build configuration.
+    BuildConfig(CpythonBuildConfigArgs),
+}
+
+/// Arguments for the `cpython analyze` subcommand.
+#[derive(Args, Debug)]
+pub struct CpythonAnalyzeArgs {
+    /// Python module names to analyze (space-separated).
+    #[arg(index = 1, num_args = 1..)]
+    pub modules: Vec<String>,
+
+    /// CPython version major.minor (default: 3.12).
+    #[arg(long, default_value = "3.12")]
+    pub version: String,
+}
+
+/// Arguments for the `cpython build-config` subcommand.
+#[derive(Args, Debug)]
+pub struct CpythonBuildConfigArgs {
+    /// Python module names to include (space-separated).
+    #[arg(index = 1, num_args = 1..)]
+    pub modules: Vec<String>,
+
+    /// Target platform (e.g., windows-x64, linux-x64).
+    #[arg(short, long, default_value = "windows-x64")]
+    pub target: String,
+
+    /// CPython version major.minor (default: 3.12).
+    #[arg(long, default_value = "3.12")]
+    pub version: String,
 }
 
 /// Arguments for the `compile` subcommand.

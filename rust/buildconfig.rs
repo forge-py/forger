@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::result::{ForgerError, ForgerResult};
+use pyo3::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Tool check types
@@ -45,6 +46,7 @@ impl std::fmt::Display for ToolCheck {
 
 /// Result of a full build-config check for a target.
 #[derive(Debug)]
+#[pyclass]
 pub struct BuildConfigResult {
     /// The target platform that was checked.
     pub target: String,
@@ -54,6 +56,7 @@ pub struct BuildConfigResult {
     pub passed: bool,
 }
 
+#[pymethods]
 impl BuildConfigResult {
     pub fn has_issues(&self) -> bool {
         !self.passed
@@ -353,12 +356,12 @@ fn check_emscripten_tools(tools: &mut Vec<(String, ToolCheck)>, passed: &mut boo
 
 /// Parse the OS portion of a target triple.
 fn parse_target_os(target: &str) -> ForgerResult<String> {
-    let parts: Vec<&str> = target.split('-').collect();
-    if parts.is_empty() {
+    if target.is_empty() {
         return Err(ForgerError::InvalidArgument(format!(
             "invalid target triple: {target}"
         )));
     }
+    let parts: Vec<&str> = target.split('-').collect();
     Ok(parts[0].to_string())
 }
 

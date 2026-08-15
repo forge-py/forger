@@ -600,22 +600,65 @@ class Compiler:
         else:
             logger.info("forger.py contributed no config")
 
-    def run_plugins(self, plugins=None) -> None:
-        """Run framework plugins."""
+    def run_plugins(self, plugins=None, *, include_optimizer: bool = True) -> None:
+        """Run framework plugins.
+
+        If ``plugins`` is not passed, fall back to the plugin list
+        stored in the forger API context (populated by
+        ``forger_plugin_django.defineConfig()``).
+
+        When ``include_optimizer`` is True, the default
+        ``StripCommentsDocstrings`` post-pass is appended automatically.
+        """
         if not self.graph:
             return
 
-        if plugins:
-            from forger.optimizer import PluginContext, PluginRunner
+        # Resolve plugins: explicit arg > forger API context > empty
+        if plugins is None:
+            try:
+                import forger.api as api_module
+                ctx = api_module.get_context()
+                plugins = ctx.plugins or []
+            except (ImportError, Exception):
+                plugins = []
 
-            plugin_ctx = PluginContext(project_root=self.project_root)
-            plugin_ctx.set_graph(self.graph)
-            self._plugin_context = plugin_ctx
+        # Auto-append optimizer pass if requested
+        if include_optimizer:
+            from forger.optimizer.strip import StripCommentsDocstrings
 
-            runner = PluginRunner(plugins)
-            runner.run_build_graph(plugin_ctx)
-            runner.run_build_graph(plugin_ctx)
-            logger.info("Ran %d plugins", len(plugins))
+            plugins = list(plugins) + [StripCommentsDocstrings()]
+
+        if not plugins:
+            logger.info("No plugins configured")
+            return
+
+        from forger.optimizer import PluginContext, PluginRunner
+
+        plugin_ctx = PluginContext(project_root=self.project_root)
+        plugin_ctx.set_graph(self.graph)
+        self._plugin_context = plugin_ctx
+
+        runner = PluginRunner(plugins)
+        runner.run_build_start(plugin_ctx)
+        runner.run_build_graph(plugin_ctx)
+        runner.run_before_shake(plugin_ctx)
+
+        # Mark reachable nodes as required (tree-shaking)
+        self.graph.mark_reachable_required()
+
+        # Run post-shake hooks (dead code detection, optimizer passes)
+        runner.run_after_shake(plugin_ctx)
+
+        # Log unoptimized dependencies discovered by plugins
+        unopt = plugin_ctx.unoptimized_dependencies
+        if unopt:
+            logger.info(
+                "Plugins declared %d unoptimized dependencies: %s",
+                len(unopt),
+                ", ".join(sorted(unopt)[:20]),
+            )
+
+        logger.info("Ran %d plugins", len(plugins))
 
     def generate_vfs(self) -> None:
         """Generate the VFS directory from analysis results.
@@ -680,11 +723,20 @@ class Compiler:
 
             dest = self.output_path / rel_path
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(source_file.read_bytes())
+
+            # Prefer optimized node.content if available, else read from disk
+            node = self.graph.get_node(module_name)
+            if node is not None and node.get_content() is not None:
+                dest.write_text(node.get_content(), encoding="utf-8")
+            else:
+                dest.write_bytes(source_file.read_bytes())
             copied += 1
 
         # Copy resources from include patterns (templates, locale, static, etc.)
         resource_count = self._copy_include_resources()
+
+        # Copy resource nodes from the dependency graph (added by plugins)
+        graph_resource_count = self._copy_graph_resources()
 
         # Determine required third-party packages from import analysis
         imported_modules = self._get_imported_modules()
@@ -745,6 +797,127 @@ class Compiler:
             tar.addfile(tarinfo, io.BytesIO(manifest_data))
 
         logger.info("Artifact generated: %s", artifact)
+
+    def _copy_graph_resources(self) -> int:
+        """Copy resource nodes from the dependency graph into the output.
+
+        Plugins add non-Python files (templates, static files, locale data)
+        as NodeType.Resource nodes.  Those nodes are marked required by
+        ``mark_reachable_required()`` so they survive tree-shaking.  This
+        method copies the actual files from the project root into the
+        output directory.
+
+        For Django template resource nodes whose IDs are Django template
+        paths (e.g. ``blog/post_list.html``) rather than filesystem paths,
+        this method falls back to searching template directories to
+        locate the actual file on disk.
+        """
+        from forger.core import NodeType
+
+        resource_nodes = self.graph.nodes_by_type(NodeType.Resource)
+        # Track resolved paths to avoid copying the same file twice
+        resolved: set[str] = set()
+        copied = 0
+        for node in resource_nodes:
+            if not node.required:
+                continue
+            src = self._resolve_resource_path(node.id)
+            if src is None:
+                continue
+            # Canonicalize to avoid duplicate copies
+            try:
+                canonical = str(src.resolve())
+            except OSError:
+                canonical = str(src)
+            if canonical in resolved:
+                continue
+            resolved.add(canonical)
+            dest = self.output_path / node.id
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.exists():
+                import shutil
+
+                shutil.copy2(src, dest)
+                copied += 1
+                logger.debug("[compiler] Copied resource: %s -> %s", node.id, dest)
+        return copied
+
+    def _resolve_resource_path(self, node_id: str) -> Path | None:
+        """Resolve a resource node ID to an actual file on disk.
+
+        First try the direct path (``project_root / node_id``). If that
+        doesn't exist, search all template directories in the project
+        for a file matching the Django template path (e.g.
+        ``blog/post_list.html`` might live at
+        ``templates/blog/post_list.html`` or
+        ``blog/templates/blog/post_list.html``).
+        """
+        # Normalize path separators
+        normalized = node_id.replace("/", os.sep).replace("\\", os.sep)
+        direct = self.project_root / normalized
+        if direct.is_file():
+            return direct
+
+        # Normalize with original separators too (in case os.sep differ)
+        direct2 = self.project_root / node_id
+        if direct2.is_file():
+            return direct2
+
+        # Fallback: search template directories for Django template paths
+        result = self._search_template_dirs(node_id)
+        if result is not None:
+            logger.debug(
+                "[compiler] Resolved Django template path '%s' -> %s",
+                node_id, result,
+            )
+            return result
+
+        logger.debug(
+            "[compiler] Resource node not found on disk: %s (tried: %s, %s)",
+            node_id, direct, direct2,
+        )
+        return None
+
+    def _search_template_dirs(
+        self, template_path: str
+    ) -> Path | None:
+        """Search project template directories for a Django template file.
+
+        Django templates use relative paths like ``app/template.html``.
+        This searches:
+        1. Top-level ``templates/`` directories
+        2. App-level ``app/templates/app/`` directories
+        """
+        import os
+
+        # Normalize to OS separators
+        normalized = template_path.replace("/", os.sep).replace("\\", os.sep)
+
+        # 1. Search top-level templates directories
+        for templates_dir in self.project_root.iterdir():
+            if not templates_dir.is_dir():
+                continue
+            if templates_dir.name == "templates" or templates_dir.name.startswith("templates"):
+                candidate = templates_dir / normalized
+                if candidate.is_file():
+                    return candidate
+
+        # 2. Search app-level templates directories (app/templates/...)
+        for app_dir in self.project_root.iterdir():
+            if not app_dir.is_dir():
+                continue
+            app_templates = app_dir / "templates"
+            if not app_templates.is_dir():
+                continue
+            candidate = app_templates / normalized
+            if candidate.is_file():
+                return candidate
+            # Also search recursively within app templates
+            for html_file in app_templates.rglob(os.path.basename(normalized)):
+                if html_file.is_file():
+                    return html_file
+
+        return None
 
     def _copy_include_resources(self) -> int:
         """Copy resources matching include patterns from forger.py config."""

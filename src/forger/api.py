@@ -85,6 +85,7 @@ class _ForgerContext:
     def __init__(self) -> None:
         self._config: ForgerConfig | None = None
         self._graph: Any = None
+        self._plugins: list[Any] | None = None
 
     @property
     def config(self) -> ForgerConfig | None:
@@ -105,6 +106,13 @@ class _ForgerContext:
 
     def set_graph(self, graph: Any) -> None:
         self._graph = graph
+
+    @property
+    def plugins(self) -> list[Any] | None:
+        return self._plugins
+
+    def set_plugins(self, plugins: list[Any]) -> None:
+        self._plugins = plugins
 
 
 # Global context instance — populated by forger.py during build.
