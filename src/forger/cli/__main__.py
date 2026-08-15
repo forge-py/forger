@@ -4,74 +4,49 @@ Workflow:
     forger compile  ->  dist/          (VFS directory)
     forger forge    ->  app.forge      (package dist/ into .forge artifact)
     forger build    ->  native binary  (consume .forge, produce executable)
+
+The CLI is implemented in Rust (clap) and this Python module delegates
+command execution to the Python-level Compiler/Builder pipelines.
+Argument parsing is handled by the Rust binary — this module provides
+the Python execution layer.
 """
 
 from __future__ import annotations
 
 import logging
+import shutil
 import sys
 from pathlib import Path
-
-try:
-    import click
-except ImportError:
-    click = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
 
-@click.group()  # type: ignore[name-defined]
-@click.version_option(version="0.1.0")  # type: ignore[name-defined]
-def main() -> None:
-    """Forger — Python application compiler and bundler."""
-    pass
+# ---------------------------------------------------------------------------
+# Command implementations (called by the Rust CLI via the entry point)
+# ---------------------------------------------------------------------------
 
 
-@main.command()  # type: ignore[name-defined]
-@click.argument("source", type=click.Path(exists=True), default=".")  # type: ignore[name-defined]
-@click.option(  # type: ignore[name-defined]
-    "--output", "-o", default="dist", help="Output VFS directory."
-)
-@click.option(  # type: ignore[name-defined]
-    "--entry-point", "-e", default="main", help="Entry point module."
-)
-@click.option(  # type: ignore[name-defined]
-    "--venv", type=click.Path(exists=True),  # type: ignore[name-defined]
-    help="Path to virtual environment."
-)
-@click.option(  # type: ignore[name-defined]
-    "--forger-py", type=click.Path(exists=True),  # type: ignore[name-defined]
-    help="Path to forger.py project extension."
-)
-@click.option(  # type: ignore[name-defined]
-    "--verbose", "-v", is_flag=True, help="Enable verbose output."
-)
-def compile(  # noqa: A001  # type: ignore[name-defined]
+def run_compile(
     source: str,
     output: str,
     entry_point: str,
-    venv: str | None,
-    forger_py: str | None,
-    verbose: bool,
+    venv: str | None = None,
+    forger_py: str | None = None,
+    verbose: bool = False,
 ) -> None:
     """Analyze a Python project and output VFS to dist/ directory."""
-    if verbose:
-        logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, force=True)
-    else:
-        logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
+    setup_logging(verbose)
 
     print(f"Forger compile: {source} -> {output}")
     print(f"Entry point: {entry_point}")
 
     project_root = Path(source).resolve()
-    # Resolve output relative to the source directory, not CWD
     output_path = Path(output)
     if not output_path.is_absolute():
         output_dir = project_root / output_path
     else:
         output_dir = output_path.resolve()
 
-    # Run the compilation pipeline
     try:
         from forger.compiler import Compiler
 
@@ -81,21 +56,17 @@ def compile(  # noqa: A001  # type: ignore[name-defined]
             output_path=output_dir,
         )
 
-        # Run analysis (creates the dependency graph)
         compiler.analyze()
 
-        # Process forger.py if present — graph is now available for plugins
         if forger_py:
             compiler.process_forger_py(Path(forger_py).resolve())
         else:
-            # Auto-detect forger.py or forger.config.py
             for forger_cfg_name in ("forger.py", "forger.config.py"):
                 forger_py_path = project_root / forger_cfg_name
                 if forger_py_path.exists():
                     compiler.process_forger_py(forger_py_path)
                     break
 
-        # Check for dist_dir override from config
         import forger.api as api_module
 
         ctx = api_module.get_context()
@@ -107,17 +78,11 @@ def compile(  # noqa: A001  # type: ignore[name-defined]
                 compiler.output_path = cfg_output
                 logger.info("Using dist_dir from config: %s", cfg_output)
 
-        # Clean dist directory before compiling
-        import shutil
-
         if output_dir.exists():
             shutil.rmtree(output_dir)
             logger.info("Cleaned dist directory: %s", output_dir)
 
-        # Run plugins (framework-specific discovery)
         compiler.run_plugins()
-
-        # Generate VFS directory (includes venv package copying)
         compiler.generate_vfs()
 
         print(f"Compilation complete: {output_dir}")
@@ -128,24 +93,13 @@ def compile(  # noqa: A001  # type: ignore[name-defined]
         sys.exit(1)
 
 
-@main.command()  # type: ignore[name-defined]
-@click.argument("vfs_dir", type=click.Path(exists=True), default="dist")  # type: ignore[name-defined]
-@click.option(  # type: ignore[name-defined]
-    "--output", "-o", default="app.forge", help="Output .forge artifact path."
-)
-@click.option(  # type: ignore[name-defined]
-    "--verbose", "-v", is_flag=True, help="Enable verbose output."
-)
-def forge(  # type: ignore[name-defined]
+def run_forge(
     vfs_dir: str,
     output: str,
-    verbose: bool,
+    verbose: bool = False,
 ) -> None:
     """Package the VFS dist/ directory into a .forge artifact."""
-    if verbose:
-        logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, force=True)
-    else:
-        logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
+    setup_logging(verbose)
 
     logger.info("Forger forge: %s -> %s", vfs_dir, output)
 
@@ -165,29 +119,14 @@ def forge(  # type: ignore[name-defined]
         sys.exit(1)
 
 
-@main.command()  # type: ignore[name-defined]
-@click.argument("artifact", type=click.Path(exists=True))  # type: ignore[name-defined]
-@click.option(  # type: ignore[name-defined]
-    "--target", "-t", default="windows-x64",
-    help="Target platform (e.g., windows-x64, linux-x64, android-arm64).",
-)
-@click.option(  # type: ignore[name-defined]
-    "--output", "-o", default=None, help="Output directory."
-)
-@click.option(  # type: ignore[name-defined]
-    "--verbose", "-v", is_flag=True, help="Enable verbose output."
-)
-def build(  # type: ignore[name-defined]
+def run_build(
     artifact: str,
     target: str,
-    output: str | None,
-    verbose: bool,
+    output: str | None = None,
+    verbose: bool = False,
 ) -> None:
     """Build a platform-specific executable from a .forge artifact."""
-    if verbose:
-        logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, force=True)
-    else:
-        logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
+    setup_logging(verbose)
 
     logger.info("Forger build: %s -> %s", artifact, target)
 
@@ -209,11 +148,7 @@ def build(  # type: ignore[name-defined]
         sys.exit(1)
 
 
-@main.command()  # type: ignore[name-defined]
-@click.argument("artifact", type=click.Path(exists=True))  # type: ignore[name-defined]
-def info(  # type: ignore[name-defined]
-    artifact: str,
-) -> None:
+def run_info(artifact: str) -> None:
     """Show information about a .forge artifact."""
     try:
         from forger.builder import Builder
@@ -230,12 +165,247 @@ def info(  # type: ignore[name-defined]
         sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# Logging setup
+# ---------------------------------------------------------------------------
+
+
+def setup_logging(verbose: bool) -> None:
+    """Configure logging based on verbosity."""
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, force=True)
+    else:
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
+
+
+# ---------------------------------------------------------------------------
+# Entry point — delegates to Rust CLI for arg parsing, then runs Python
+# command implementations.
+# ---------------------------------------------------------------------------
+
+
 def run() -> None:
-    """Entry point for the forger command."""
-    if click is None:
-        print("Error: click is required. Install with: uv sync", file=sys.stderr)
+    """Entry point for the forger command.
+
+    The Rust binary (clap) handles argument parsing. When invoked via
+    the Python entry point, we dispatch to the appropriate command
+    implementation based on sys.argv.
+    """
+    args = sys.argv[1:]
+    if not args:
+        print_usage()
         sys.exit(1)
-    main()
+
+    command = args[0]
+
+    if command == "--version" or command == "-V":
+        from forger import __version__
+
+        print(f"forger {__version__}")
+        return
+
+    if command == "--help" or command == "-h":
+        print_usage()
+        return
+
+    if command == "compile":
+        parsed = _parse_compile_args(args[1:])
+        run_compile(**parsed)
+    elif command == "forge":
+        parsed = _parse_forge_args(args[1:])
+        run_forge(**parsed)
+    elif command == "build":
+        parsed = _parse_build_args(args[1:])
+        run_build(**parsed)
+    elif command == "info":
+        parsed = _parse_info_args(args[1:])
+        run_info(**parsed)
+    elif command == "build-config":
+        _run_build_config(args[1:])
+    else:
+        print(f"Error: unknown command '{command}'", file=sys.stderr)
+        print_usage()
+        sys.exit(1)
+
+
+def _parse_compile_args(args: list[str]) -> dict[str, object]:
+    result: dict[str, object] = {
+        "source": ".",
+        "output": "dist",
+        "entry_point": "main",
+        "venv": None,
+        "forger_py": None,
+        "verbose": False,
+    }
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--output" or a == "-o":
+            i += 1
+            result["output"] = args[i] if i < len(args) else "dist"
+        elif a == "--entry-point" or a == "-e":
+            i += 1
+            result["entry_point"] = args[i] if i < len(args) else "main"
+        elif a == "--venv":
+            i += 1
+            result["venv"] = args[i] if i < len(args) else None
+        elif a == "--forger-py":
+            i += 1
+            result["forger_py"] = args[i] if i < len(args) else None
+        elif a == "--verbose" or a == "-v":
+            result["verbose"] = True
+        elif not a.startswith("-"):
+            result["source"] = a
+        i += 1
+    return result
+
+
+def _parse_forge_args(args: list[str]) -> dict[str, object]:
+    result: dict[str, object] = {
+        "vfs_dir": "dist",
+        "output": "app.forge",
+        "verbose": False,
+    }
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--output" or a == "-o":
+            i += 1
+            result["output"] = args[i] if i < len(args) else "app.forge"
+        elif a == "--verbose" or a == "-v":
+            result["verbose"] = True
+        elif not a.startswith("-"):
+            result["vfs_dir"] = a
+        i += 1
+    return result
+
+
+def _parse_build_args(args: list[str]) -> dict[str, object]:
+    result: dict[str, object] = {
+        "artifact": "",
+        "target": "windows-x64",
+        "output": None,
+        "verbose": False,
+    }
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--target" or a == "-t":
+            i += 1
+            result["target"] = args[i] if i < len(args) else "windows-x64"
+        elif a == "--output" or a == "-o":
+            i += 1
+            result["output"] = args[i] if i < len(args) else None
+        elif a == "--verbose" or a == "-v":
+            result["verbose"] = True
+        elif not a.startswith("-"):
+            result["artifact"] = a
+        i += 1
+    return result
+
+
+def _parse_info_args(args: list[str]) -> dict[str, object]:
+    result: dict[str, object] = {"artifact": ""}
+    for a in args:
+        if not a.startswith("-"):
+            result["artifact"] = a
+    return result
+
+
+def _run_build_config(args: list[str]) -> None:
+    if not args or args[0] != "check":
+        print("Error: unknown build-config subcommand. Use 'check'.", file=sys.stderr)
+        sys.exit(1)
+
+    target = "windows-x64"
+    i = 1
+    while i < len(args):
+        a = args[i]
+        if a == "--target" or a == "-t":
+            i += 1
+            target = args[i] if i < len(args) else "windows-x64"
+        i += 1
+
+    try:
+        from forger_core import check_build_config  # type: ignore[import-not-found, import-untyped, missing-import]
+
+        result = check_build_config(target)
+        print(result.format_report())
+        if result.has_issues():
+            sys.exit(1)
+    except ImportError:
+        # Rust core not available — do a basic Python-level check
+        _build_config_check_python(target)
+
+
+def _build_config_check_python(target: str) -> None:
+    """Fallback build-config check when Rust core is not available."""
+    import shutil
+    import subprocess
+    import sys
+
+    os = target.split("-")[0]
+    tools: list[tuple[str, bool]] = []
+
+    if os == "windows":
+        tools.append(("MSVC Compiler (cl.exe)", shutil.which("cl.exe") is not None))
+        tools.append(("MSVC Librarian (lib.exe)", shutil.which("lib.exe") is not None))
+        tools.append(("MSVC Linker (link.exe)", shutil.which("link.exe") is not None))
+    elif os == "linux":
+        tools.append(("GCC", shutil.which("gcc") is not None))
+        tools.append(("G++", shutil.which("g++") is not None))
+        tools.append(("Make", shutil.which("make") is not None))
+    elif os == "macos":
+        try:
+            result = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True)
+            tools.append(("Xcode Command Line Tools", result.returncode == 0))
+        except FileNotFoundError:
+            tools.append(("Xcode Command Line Tools", False))
+        tools.append(("Clang", shutil.which("clang") is not None))
+
+    # Python check (all platforms)
+    tools.append(("Python", sys.executable is not None and Path(sys.executable).exists()))
+
+    passed = all(ok for _, ok in tools)
+
+    print(f"Build Configuration Check: {target}")
+    print("─" * 50)
+    for name, ok in tools:
+        status = "✓" if ok else "✗"
+        state = "present" if ok else "missing"
+        print(f"  {status} {name}: {state}")
+    print("─" * 50)
+    print(
+        "Result: All required tools are available"
+        if passed
+        else "Result: Some required tools are missing or misconfigured"
+    )
+
+    if not passed:
+        sys.exit(1)
+
+
+def print_usage() -> None:
+    """Print CLI usage information."""
+    print(
+        """\
+Usage: forger <COMMAND>
+
+Forger — Python application compiler and bundler
+
+Commands:
+  compile        Analyze and compile a Python project into a VFS directory
+  forge          Package the VFS directory into a .forge artifact
+  build          Build a platform-specific executable from a .forge artifact
+  info           Show information about a .forge artifact
+  build-config   Build-config subcommands
+    check        Check if required build tools are present on the machine
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+  -v, --verbose  Enable verbose output"""
+    )
 
 
 if __name__ == "__main__":

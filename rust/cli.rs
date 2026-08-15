@@ -3,7 +3,7 @@
 //! Uses clap derive macros for type-safe CLI argument parsing,
 //! same pattern as Ruff.
 
-use clap::Parser;
+use clap::{Parser, Subcommand, Args};
 
 /// Forger — Python application compiler, analyzer, bundler, and cross-platform executable builder.
 #[derive(Parser, Debug)]
@@ -19,27 +19,40 @@ pub struct Cli {
     pub command: Commands,
 }
 
-#[derive(clap::Subcommand, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Analyze and compile a Python project into a .forge artifact.
+    /// Analyze and compile a Python project into a VFS directory.
     Compile(CompileArgs),
+
+    /// Package the VFS directory into a .forge artifact.
+    Forge(ForgeArgs),
 
     /// Build a platform-specific executable from a .forge artifact.
     Build(BuildArgs),
 
     /// Show information about a .forge artifact.
     Info(InfoArgs),
+
+    /// Build-config subcommands.
+    #[command(subcommand)]
+    BuildConfig(BuildConfigCommands),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BuildConfigCommands {
+    /// Check if required build tools (MSVC, etc.) are present on the machine.
+    Check(CheckArgs),
 }
 
 /// Arguments for the `compile` subcommand.
-#[derive(Parser, Debug)]
+#[derive(Args, Debug)]
 pub struct CompileArgs {
     /// Source directory to compile.
-    #[arg(short, long, default_value = ".")]
+    #[arg(index = 1, default_value = ".")]
     pub source: String,
 
-    /// Output .forge file path.
-    #[arg(short, long, default_value = "app.forge")]
+    /// Output VFS directory.
+    #[arg(short, long, default_value = "dist")]
     pub output: String,
 
     /// Entry point module name.
@@ -55,8 +68,20 @@ pub struct CompileArgs {
     pub forger_py: Option<String>,
 }
 
+/// Arguments for the `forge` subcommand.
+#[derive(Args, Debug)]
+pub struct ForgeArgs {
+    /// VFS directory to package (output of `forger compile`).
+    #[arg(index = 1, default_value = "dist")]
+    pub vfs_dir: String,
+
+    /// Output .forge artifact path.
+    #[arg(short, long, default_value = "app.forge")]
+    pub output: String,
+}
+
 /// Arguments for the `build` subcommand.
-#[derive(Parser, Debug)]
+#[derive(Args, Debug)]
 pub struct BuildArgs {
     /// Path to the .forge artifact.
     pub artifact: String,
@@ -71,8 +96,16 @@ pub struct BuildArgs {
 }
 
 /// Arguments for the `info` subcommand.
-#[derive(Parser, Debug)]
+#[derive(Args, Debug)]
 pub struct InfoArgs {
     /// Path to the .forge artifact.
     pub artifact: String,
+}
+
+/// Arguments for the `build-config check` subcommand.
+#[derive(Args, Debug)]
+pub struct CheckArgs {
+    /// Target platform to check build tools for (e.g., windows-x64, linux-x64).
+    #[arg(short, long, default_value = "windows-x64")]
+    pub target: String,
 }

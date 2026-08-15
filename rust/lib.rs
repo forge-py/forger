@@ -8,8 +8,10 @@
 //! - `.forge` artifact serialization/deserialization
 //! - Parallel processing orchestration
 //! - CLI argument parsing (clap)
+//! - Build configuration checking
 //! - PyO3 bindings for Python integration
 
+pub mod buildconfig;
 pub mod cache;
 pub mod cli;
 pub mod depgraph;
@@ -22,6 +24,7 @@ pub mod result;
 pub mod vfs;
 
 // Re-export core types for convenient access
+pub use buildconfig::{check_build_config, BuildConfigResult, ToolCheck};
 pub use cache::Cache;
 pub use depgraph::{DependencyGraph, DependencyNode, DependencyEdge, NodeType, EdgeType, EdgeProvenance};
 pub use filesystem::{FileDiscovery, FileEntry, DiscoveryOptions};
