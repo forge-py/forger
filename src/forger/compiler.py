@@ -520,7 +520,7 @@ class Compiler:
 
     def _analyze_pure_python(self) -> None:
         """Pure Python fallback for file discovery and graph construction."""
-        from forger.core import DependencyNode, NodeType
+        from forger.core import DependencyNode, DependencyGraph, NodeType
 
         # Create dependency graph
         self.graph = DependencyGraph()

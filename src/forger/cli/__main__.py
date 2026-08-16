@@ -5,10 +5,10 @@ Workflow:
     forger forge    ->  app.forge      (package dist/ into .forge artifact)
     forger build    ->  native binary  (consume .forge, produce executable)
 
-The CLI is implemented in Rust (clap) and this Python module delegates
-command execution to the Python-level Compiler/Builder pipelines.
-Argument parsing is handled by the Rust binary — this module provides
-the Python execution layer.
+The CLI is a pure Python entry point that calls into the forger_core
+Rust library via PyO3 for performance-critical operations. No separate
+Rust binary is produced — all argument parsing and dispatch happens
+in Python, with heavy lifting delegated to the Rust core.
 """
 
 from __future__ import annotations
@@ -19,6 +19,49 @@ import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Config pre-read helpers
+# ---------------------------------------------------------------------------
+
+
+def _entry_point_from_config(config_path: Path) -> str | None:
+    """Read the entry point from a forger config file without full execution.
+
+    Parses the config file via AST to extract the ``entry`` keyword argument
+    from ``defineConfig()`` calls, avoiding a full import that may fail
+    when dependencies are not yet available.
+    """
+    try:
+        import ast
+
+        tree = ast.parse(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        # Match defineConfig(...) calls
+        func = node.func
+        func_name = None
+        if isinstance(func, ast.Name) and func.id == "defineConfig":
+            func_name = "defineConfig"
+        elif isinstance(func, ast.Attribute) and func.attr == "defineConfig":
+            func_name = "defineConfig"
+        if func_name is None:
+            continue
+        # Look for entry= keyword argument
+        for kw in node.keywords:
+            if kw.arg == "entry" and isinstance(kw.value, ast.Constant):
+                val = kw.value.value
+                # Normalize: strip trailing .py so the entry point is a
+                # module name consistent with the rest of the codebase.
+                if isinstance(val, str) and val.endswith(".py"):
+                    val = val[:-3]
+                return val
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -38,12 +81,33 @@ def run_compile(
     setup_logging(verbose)
 
     print(f"Forger compile: {source} -> {output}")
-    print(f"Entry point: {entry_point}")
 
     project_root = Path(source).resolve()
     if not project_root.exists() or not project_root.is_dir():
         print(f"Error: source directory does not exist: {project_root}", file=sys.stderr)
         sys.exit(1)
+
+    # Resolve the forger config path early so we can read the entry point
+    # override before validating the entry file exists.
+    forger_py_path: Path | None = None
+    if forger_py:
+        forger_py_path = Path(forger_py).resolve()
+    else:
+        for forger_cfg_name in ("forger.py", "forger.config.py"):
+            candidate = project_root / forger_cfg_name
+            if candidate.exists():
+                forger_py_path = candidate
+                break
+
+    # If a config file exists, try to read the entry point override
+    # before we validate the entry file.
+    if forger_py_path is not None:
+        resolved_entry = _entry_point_from_config(forger_py_path)
+        if resolved_entry:
+            entry_point = resolved_entry
+
+    print(f"Entry point: {entry_point}")
+
     entry_file = project_root / (entry_point + ".py")
     if not entry_file.exists():
         # Try without .py extension (package mode)
@@ -69,14 +133,8 @@ def run_compile(
 
         compiler.analyze()
 
-        if forger_py:
-            compiler.process_forger_py(Path(forger_py).resolve())
-        else:
-            for forger_cfg_name in ("forger.py", "forger.config.py"):
-                forger_py_path = project_root / forger_cfg_name
-                if forger_py_path.exists():
-                    compiler.process_forger_py(forger_py_path)
-                    break
+        if forger_py_path is not None:
+            compiler.process_forger_py(forger_py_path)
 
         import forger.api as api_module
 
@@ -195,17 +253,16 @@ def setup_logging(verbose: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Entry point — delegates to Rust CLI for arg parsing, then runs Python
-# command implementations.
+# Entry point — Python CLI that delegates heavy lifting to forger_core (Rust).
 # ---------------------------------------------------------------------------
 
 
 def run() -> None:
     """Entry point for the forger command.
 
-    The Rust binary (clap) handles argument parsing. When invoked via
-    the Python entry point, we dispatch to the appropriate command
-    implementation based on sys.argv.
+    All argument parsing and dispatch happens in Python. Heavy-lifting
+    operations (hashing, graph construction, VFS generation) are
+    delegated to the forger_core Rust library via PyO3.
     """
     args = sys.argv[1:]
     if not args:
@@ -429,7 +486,9 @@ def _build_config_check_python(target: str) -> None:
 
 def _run_cpython(args: list[str]) -> None:
     if not args or args[0] not in ("analyze", "build-config"):
-        print("Error: unknown cpython subcommand. Use 'analyze' or 'build-config'.", file=sys.stderr)
+        print(
+            "Error: unknown cpython subcommand. Use 'analyze' or 'build-config'.", file=sys.stderr
+        )
         sys.exit(1)
 
     subcommand = args[0]

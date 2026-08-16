@@ -7,13 +7,14 @@
 //! - Hashing, caching, and incremental build detection
 //! - `.forge` artifact serialization/deserialization
 //! - Parallel processing orchestration
-//! - CLI argument parsing (clap)
 //! - Build configuration checking
 //! - PyO3 bindings for Python integration
+//!
+//! The CLI is a Python entry point that calls into this library via PyO3.
+//! No separate Rust binary is produced.
 
 pub mod buildconfig;
 pub mod cache;
-pub mod cli;
 pub mod cpython;
 pub mod depgraph;
 pub mod filesystem;
@@ -29,17 +30,21 @@ pub mod vfs;
 // Re-export core types for convenient access
 pub use buildconfig::{check_build_config, BuildConfigResult, ToolCheck};
 pub use cache::Cache;
-pub use cpython::{CpythonModuleRegistry, CpythonAnalysisResult, CpythonBuildConfig, CpythonSourceAnalyzer};
-pub use depgraph::{DependencyGraph, DependencyNode, DependencyEdge, NodeType, EdgeType, EdgeProvenance};
-pub use filesystem::{FileDiscovery, FileEntry, DiscoveryOptions};
+pub use cpython::{
+    CpythonAnalysisResult, CpythonBuildConfig, CpythonModuleRegistry, CpythonSourceAnalyzer,
+};
+pub use depgraph::{
+    DependencyEdge, DependencyGraph, DependencyNode, EdgeProvenance, EdgeType, NodeType,
+};
+pub use filesystem::{DiscoveryOptions, FileDiscovery, FileEntry};
+pub use forge::{ForgeArtifact, ForgeBuilder, ForgeManifest};
 pub use graphbuilder::GraphBuilder;
 pub use graphstore::GraphStore;
-pub use forge::{ForgeArtifact, ForgeManifest, ForgeBuilder};
 pub use hash::{content_hash, content_hash_reader, HashValue};
 pub use module::{ModuleResolver, ModuleSpec};
 pub use pathutil::{normalize_path, normalize_path_buf, PathSet};
 pub use result::{ForgerError, ForgerResult};
-pub use vfs::{VirtualFileSystem, VfsNode, VfsEntry};
+pub use vfs::{VfsEntry, VfsNode, VirtualFileSystem};
 
 // PyO3 Python module binding
 // Exposed as `forger._core` when built via maturin.
