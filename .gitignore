@@ -36,7 +36,7 @@ Thumbs.db
 *.pyd
 *.pdb
 
-# Forger cache (vite-style content-addressed cache)
+# Forger cache (content-addressed cache)
 .forger/
 
 # Logs

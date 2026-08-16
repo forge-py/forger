@@ -51,7 +51,7 @@ class ForgerConfigDict(TypedDict, total=False):
 
 @dataclass
 class ForgerConfig:
-    """Top-level build configuration (Vite-style defineConfig).
+    """Top-level build configuration.
 
     Attributes:
         entry: Entry-point module or script (e.g. ``"manage.py"``).
@@ -112,7 +112,31 @@ class _ForgerContext:
         return self._plugins
 
     def set_plugins(self, plugins: list[Any]) -> None:
+        _validate_plugins(plugins)
         self._plugins = plugins
+
+
+def _validate_plugins(plugins: list[Any]) -> None:
+    """Validate that all plugins inherit from BasePlugin.
+
+    Raises
+    ------
+    TypeError
+        If a plugin does not inherit from ``BasePlugin``.
+    """
+    from forger.optimizer import BasePlugin
+
+    for idx, plugin in enumerate(plugins):
+        if not isinstance(plugin, BasePlugin):
+            raise TypeError(
+                f"Plugin at index {idx} ({type(plugin).__name__!r}) is not a "
+                f"valid Forger plugin. It must inherit from BasePlugin."
+            )
+        if type(plugin) is BasePlugin:
+            raise TypeError(
+                f"Plugin at index {idx} is the base BasePlugin class. "
+                f"Subclass it and register your implementation."
+            )
 
 
 # Global context instance — populated by forger.py during build.
@@ -127,14 +151,14 @@ def _get_context() -> _ForgerContext:
 
 
 # ---------------------------------------------------------------------------
-# Declarative API (Vite-style)
+# Declarative API
 # ---------------------------------------------------------------------------
 
 
 def defineConfig(  # noqa: N802
     config: ForgerConfigDict | ForgerConfig,
 ) -> ForgerConfig:
-    """Define a Forger build configuration (Vite-style).
+    """Define a Forger build configuration.
 
     Accepts either a ``ForgerConfig`` instance or a typed dict that will be
     used to construct one.  The returned config is stored in the global

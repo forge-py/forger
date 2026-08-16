@@ -1,4 +1,4 @@
-"""Tests for the Vite-style defineConfig API."""
+"""Tests for the defineConfig API."""
 
 from __future__ import annotations
 
