@@ -133,6 +133,7 @@ class PluginContext:
     _dynamic_symbols: set[str] = field(default_factory=set)
     _unoptimized_dependencies: set[str] = field(default_factory=set)
     _source_files: list[Path] = field(default_factory=list)
+    _current_plugin_name: str | None = None
 
     @property
     def graph(self) -> DependencyGraph:
@@ -567,7 +568,7 @@ class BasePlugin(abc.ABC):
     name: str = "<unnamed>"
 
     #: Invocation tier — ``"pre"``, ``"normal"``, or ``"post"``.
-    enforce: PluginOrder = PluginOrder.NORMAL
+    enforce: PluginOrder | str = PluginOrder.NORMAL
 
     #: When to apply this plugin — ``"build"``, ``"serve"``, or ``None`` (always).
     apply: str | None = None

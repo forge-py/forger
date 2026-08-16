@@ -226,16 +226,16 @@ def run() -> None:
 
     if command == "compile":
         parsed = _parse_compile_args(args[1:])
-        run_compile(**parsed)
+        run_compile(**parsed)  # pyrefly: ignore[bad-argument-type]
     elif command == "forge":
         parsed = _parse_forge_args(args[1:])
-        run_forge(**parsed)
+        run_forge(**parsed)  # pyrefly: ignore[bad-argument-type]
     elif command == "build":
         parsed = _parse_build_args(args[1:])
-        run_build(**parsed)
+        run_build(**parsed)  # pyrefly: ignore[bad-argument-type]
     elif command == "info":
         parsed = _parse_info_args(args[1:])
-        run_info(**parsed)
+        run_info(**parsed)  # pyrefly: ignore[bad-argument-type]
     elif command == "build-config":
         _run_build_config(args[1:])
     elif command == "cpython":

@@ -215,10 +215,13 @@ class StripCommentsDocstrings(BasePlugin):
         This hook is called by PluginRunner for each Python node.
         """
         node = context.graph.get_node(module_id)
-        if node is None or node.get_content() is None:
+        if node is None:
             return
 
         source = node.get_content()
+        if source is None:
+            return
+
         original_len = len(source)
 
         if self.strip_docstrings:
@@ -248,6 +251,8 @@ class StripCommentsDocstrings(BasePlugin):
                 continue
 
             stripped = node.get_content()
+            if stripped is None:
+                continue
             original_len = len(stripped)
 
             if self.strip_docstrings:
