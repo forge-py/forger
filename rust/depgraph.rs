@@ -20,7 +20,7 @@ use crate::result::{ForgerError, ForgerResult};
 /// Types of nodes in the dependency graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[pyclass]
+#[pyclass(eq, eq_int)]
 pub enum NodeType {
     PythonModule,
     PythonPackage,
@@ -58,38 +58,38 @@ impl fmt::Display for NodeType {
 /// Types of edges (dependency relationships) in the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[pyclass]
+#[pyclass(eq)]
 pub enum EdgeType {
-    Import,
-    FromImport,
-    RelativeImport,
-    DynamicImport,
-    ResourceDependency,
-    NativeDependency,
-    ConfigDependency,
-    PluginDependency,
-    EntryPointDependency,
-    StdlibDependency,
-    Indirect,
-    UnoptimizedDependency,
+    Import(),
+    FromImport(),
+    RelativeImport(),
+    DynamicImport(),
+    ResourceDependency(),
+    NativeDependency(),
+    ConfigDependency(),
+    PluginDependency(),
+    EntryPointDependency(),
+    StdlibDependency(),
+    Indirect(),
+    UnoptimizedDependency(),
     Custom(String),
 }
 
 impl fmt::Display for EdgeType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EdgeType::Import => write!(f, "import"),
-            EdgeType::FromImport => write!(f, "from_import"),
-            EdgeType::RelativeImport => write!(f, "relative_import"),
-            EdgeType::DynamicImport => write!(f, "dynamic_import"),
-            EdgeType::ResourceDependency => write!(f, "resource"),
-            EdgeType::NativeDependency => write!(f, "native"),
-            EdgeType::ConfigDependency => write!(f, "config"),
-            EdgeType::PluginDependency => write!(f, "plugin"),
-            EdgeType::EntryPointDependency => write!(f, "entry_point"),
-            EdgeType::StdlibDependency => write!(f, "stdlib"),
-            EdgeType::Indirect => write!(f, "indirect"),
-            EdgeType::UnoptimizedDependency => write!(f, "unoptimized"),
+            EdgeType::Import() => write!(f, "import"),
+            EdgeType::FromImport() => write!(f, "from_import"),
+            EdgeType::RelativeImport() => write!(f, "relative_import"),
+            EdgeType::DynamicImport() => write!(f, "dynamic_import"),
+            EdgeType::ResourceDependency() => write!(f, "resource"),
+            EdgeType::NativeDependency() => write!(f, "native"),
+            EdgeType::ConfigDependency() => write!(f, "config"),
+            EdgeType::PluginDependency() => write!(f, "plugin"),
+            EdgeType::EntryPointDependency() => write!(f, "entry_point"),
+            EdgeType::StdlibDependency() => write!(f, "stdlib"),
+            EdgeType::Indirect() => write!(f, "indirect"),
+            EdgeType::UnoptimizedDependency() => write!(f, "unoptimized"),
             EdgeType::Custom(label) => write!(f, "custom:{label}"),
         }
     }
@@ -97,12 +97,16 @@ impl fmt::Display for EdgeType {
 
 /// Provenance information for an edge — why this dependency exists.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[pyclass]
 pub struct EdgeProvenance {
     /// Source file and line number where the dependency was discovered.
+    #[pyo3(get, set)]
     pub source: Option<(String, usize)>,
     /// Analyzer or optimizer that discovered this dependency.
+    #[pyo3(get, set)]
     pub discovered_by: String,
     /// Additional context/description.
+    #[pyo3(get, set)]
     pub description: Option<String>,
 }
 
@@ -119,30 +123,42 @@ impl fmt::Display for EdgeProvenance {
 
 /// A node in the dependency graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[pyclass]
 pub struct DependencyNode {
     /// Unique identifier (e.g., module name, file path, resource key).
+    #[pyo3(get, set)]
     pub id: String,
     /// Type of this node.
+    #[pyo3(get, set)]
     pub node_type: NodeType,
     /// File system path (if applicable).
+    #[pyo3(get, set)]
     pub path: Option<PathBuf>,
     /// Content hash (for incremental builds).
+    #[pyo3(get, set)]
     pub hash: Option<String>,
     /// Size in bytes (if applicable).
+    #[pyo3(get, set)]
     pub size: Option<u64>,
-    /// File type classification.
+    /// File type classification (not exposed to Python).
     pub file_type: Option<FileType>,
     /// Whether this node is required (proven reachable).
+    #[pyo3(get, set)]
     pub required: bool,
     /// Whether this node is retained conservatively (unknown reachability).
+    #[pyo3(get, set)]
     pub conservative: bool,
     /// Target platform specificity (e.g., "windows-x64", "linux-arm64", None = universal).
+    #[pyo3(get, set)]
     pub target: Option<String>,
     /// Whether this node is unoptimized (bypasses tree-shaking).
+    #[pyo3(get, set)]
     pub unoptimized: bool,
     /// Metadata key-value pairs for extended information.
+    #[pyo3(get, set)]
     pub metadata: HashMap<String, String>,
     /// Optional content stored with this node.
+    #[pyo3(get, set)]
     pub content: Option<String>,
 }
 
@@ -192,14 +208,17 @@ impl DependencyNode {
 
 /// An edge representing a dependency relationship.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[pyclass]
 pub struct DependencyEdge {
     /// Source node ID.
     pub from: String,
     /// Target node ID.
     pub to: String,
     /// Type of dependency.
+    #[pyo3(get, set)]
     pub edge_type: EdgeType,
     /// Provenance information.
+    #[pyo3(get, set)]
     pub provenance: EdgeProvenance,
 }
 
@@ -222,8 +241,11 @@ impl DependencyEdge {
 /// The main dependency graph structure.
 ///
 /// Uses hashbrown HashMaps for performance-critical lookups.
+/// Once frozen, no new nodes or edges can be added — only existing
+/// nodes can be mutated (content, metadata, required flag, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "serde")]
+#[pyclass]
 pub struct DependencyGraph {
     /// Nodes indexed by ID.
     nodes: FastHashMap<String, DependencyNode>,
@@ -235,6 +257,9 @@ pub struct DependencyGraph {
     entry_points: Vec<String>,
     /// Graph-level metadata.
     metadata: HashMap<String, String>,
+    /// Whether the graph is frozen (no new nodes/edges allowed).
+    #[serde(skip)]
+    frozen: bool,
 }
 
 impl DependencyGraph {
@@ -246,6 +271,7 @@ impl DependencyGraph {
             edges_to: FastHashMap::default(),
             entry_points: Vec::new(),
             metadata: HashMap::new(),
+            frozen: false,
         }
     }
 
@@ -257,11 +283,27 @@ impl DependencyGraph {
             edges_to: FastHashMap::default(),
             entry_points: Vec::new(),
             metadata: HashMap::new(),
+            frozen: false,
         }
     }
 
-    /// Add a node to the graph. Returns false if the node already exists.
+    /// Check if the graph is frozen.
+    pub fn is_frozen(&self) -> bool {
+        self.frozen
+    }
+
+    /// Freeze the graph. No new nodes or edges can be added after this call.
+    /// Existing nodes remain mutable (content, metadata, required flag, etc.).
+    pub fn freeze(&mut self) {
+        self.frozen = true;
+    }
+
+    /// Add a node to the graph. Returns false if the node already exists
+    /// or if the graph is frozen.
     pub fn add_node(&mut self, node: DependencyNode) -> bool {
+        if self.frozen {
+            return false;
+        }
         self.nodes.insert(node.id.clone(), node).is_none()
     }
 
@@ -275,8 +317,11 @@ impl DependencyGraph {
         self.nodes.get_mut(id)
     }
 
-    /// Add an edge to the graph.
+    /// Add an edge to the graph. No-op if the graph is frozen.
     pub fn add_edge(&mut self, edge: DependencyEdge) {
+        if self.frozen {
+            return;
+        }
         let from = edge.from.clone();
         let to = edge.to.clone();
 
@@ -300,8 +345,11 @@ impl DependencyGraph {
             .unwrap_or(&[])
     }
 
-    /// Register an entry point.
+    /// Register an entry point. No-op if the graph is frozen.
     pub fn add_entry_point(&mut self, id: impl Into<String>) {
+        if self.frozen {
+            return;
+        }
         self.entry_points.push(id.into());
     }
 
@@ -566,6 +614,265 @@ impl Default for DependencyGraph {
     }
 }
 
+// --- PyO3 bindings ---
+
+#[pymethods]
+impl NodeType {
+    fn __str__(&self) -> String {
+        self.to_string()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("NodeType::{}", self)
+    }
+}
+
+#[pymethods]
+impl EdgeType {
+    fn __str__(&self) -> String {
+        self.to_string()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("EdgeType::{}", self)
+    }
+}
+
+#[pymethods]
+impl EdgeProvenance {
+    #[new]
+    #[pyo3(signature = (discovered_by, source = None, description = None))]
+    fn py_new(
+        discovered_by: String,
+        source: Option<(String, usize)>,
+        description: Option<String>,
+    ) -> Self {
+        Self {
+            source,
+            discovered_by,
+            description,
+        }
+    }
+
+    fn __str__(&self) -> String {
+        self.to_string()
+    }
+}
+
+#[pymethods]
+impl DependencyNode {
+    #[new]
+    fn py_new(id: String, node_type: NodeType) -> Self {
+        Self::new(id, node_type)
+    }
+
+    #[getter]
+    fn path(&self) -> Option<String> {
+        self.path.as_ref().map(|p| p.to_string_lossy().into_owned())
+    }
+
+    #[setter]
+    fn set_path(&mut self, path: Option<String>) {
+        self.path = path.map(PathBuf::from);
+    }
+
+    /// Mark this node as unoptimized (bypasses tree-shaking).
+    fn mark_unoptimized(&mut self) {
+        self.unoptimized = true;
+    }
+
+    fn __repr__(&self) -> String {
+        format!("DependencyNode(id={}, type={})", self.id, self.node_type)
+    }
+}
+
+#[pymethods]
+impl DependencyEdge {
+    #[new]
+    fn py_new(from_node: String, to_node: String, edge_type: EdgeType, provenance: EdgeProvenance) -> Self {
+        Self::new(from_node, to_node, edge_type, provenance)
+    }
+
+    #[getter]
+    fn from_node(&self) -> String {
+        self.from.clone()
+    }
+
+    #[getter]
+    fn to_node(&self) -> String {
+        self.to.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("DependencyEdge(from={}, to={}, type={})", self.from, self.to, self.edge_type)
+    }
+}
+
+#[pymethods]
+impl DependencyGraph {
+    #[new]
+    fn py_new() -> Self {
+        Self::new()
+    }
+
+    /// Add a node to the graph. Returns false if the node already exists.
+    #[pyo3(name = "add_node")]
+    fn py_add_node(&mut self, node: DependencyNode) -> bool {
+        DependencyGraph::add_node(self, node)
+    }
+
+    /// Get a node by ID.
+    #[pyo3(name = "get_node")]
+    fn py_get_node(&self, node_id: &str) -> Option<DependencyNode> {
+        DependencyGraph::get_node(self, node_id).cloned()
+    }
+
+    /// Add an edge to the graph.
+    #[pyo3(name = "add_edge")]
+    fn py_add_edge(&mut self, edge: DependencyEdge) {
+        DependencyGraph::add_edge(self, edge);
+    }
+
+    /// Register an entry point.
+    #[pyo3(name = "add_entry_point")]
+    fn py_add_entry_point(&mut self, node_id: String) {
+        DependencyGraph::add_entry_point(self, node_id);
+    }
+
+    /// Get all entry points.
+    #[pyo3(name = "entry_points")]
+    fn py_entry_points(&self) -> Vec<String> {
+        DependencyGraph::entry_points(self).to_vec()
+    }
+
+    /// Number of nodes.
+    #[pyo3(name = "node_count")]
+    fn py_node_count(&self) -> usize {
+        DependencyGraph::node_count(self)
+    }
+
+    /// Number of edges.
+    #[pyo3(name = "edge_count")]
+    fn py_edge_count(&self) -> usize {
+        DependencyGraph::edge_count(self)
+    }
+
+    /// Get dependencies (direct children) of a node.
+    #[pyo3(name = "dependencies_of")]
+    fn py_dependencies_of(&self, node_id: &str) -> Vec<String> {
+        DependencyGraph::dependencies_of(self, node_id)
+    }
+
+    /// Get dependents (reverse dependencies) of a node.
+    #[pyo3(name = "dependents_of")]
+    fn py_dependents_of(&self, node_id: &str) -> Vec<String> {
+        DependencyGraph::dependents_of(self, node_id)
+    }
+
+    /// Filter nodes by type.
+    #[pyo3(name = "nodes_by_type")]
+    fn py_nodes_by_type(&self, node_type: NodeType) -> Vec<DependencyNode> {
+        DependencyGraph::nodes_by_type(self, node_type)
+            .into_iter().map(|n| n.clone()).collect()
+    }
+
+    /// BFS from entry points to find all reachable nodes.
+    #[pyo3(name = "find_reachable")]
+    fn py_find_reachable(&self) -> Vec<String> {
+        DependencyGraph::find_reachable(self).into_iter().collect()
+    }
+
+    /// Mark all reachable nodes as required.
+    #[pyo3(name = "mark_reachable_required")]
+    fn py_mark_reachable_required(&mut self) {
+        DependencyGraph::mark_reachable_required(self);
+    }
+
+    /// Remove unreachable nodes and their edges.
+    #[pyo3(name = "prune_unreachable")]
+    fn py_prune_unreachable(&mut self) {
+        DependencyGraph::prune_unreachable(self);
+    }
+
+    /// Merge another graph into this one.
+    #[pyo3(name = "merge")]
+    fn py_merge(&mut self, other: DependencyGraph) {
+        DependencyGraph::merge(self, other);
+    }
+
+    /// Validate graph integrity.
+    #[pyo3(name = "validate")]
+    fn py_validate(&self) -> PyResult<()> {
+        DependencyGraph::validate(self)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    /// Check if a node is dead (not reachable and not unoptimized).
+    #[pyo3(name = "is_dead")]
+    fn py_is_dead(&self, node_id: &str) -> bool {
+        DependencyGraph::is_dead(self, node_id)
+    }
+
+    /// Return all dead (unreachable) node IDs.
+    #[pyo3(name = "find_dead_nodes")]
+    fn py_find_dead_nodes(&self) -> Vec<String> {
+        DependencyGraph::find_dead_nodes(self)
+    }
+
+    /// Remove a node from the graph. Returns true if the node existed.
+    #[pyo3(name = "delete_node")]
+    fn py_delete_node(&mut self, node_id: &str) -> bool {
+        DependencyGraph::delete_node(self, node_id)
+    }
+
+    /// Return all nodes marked as unoptimized.
+    #[pyo3(name = "get_unoptimized_nodes")]
+    fn py_get_unoptimized_nodes(&self) -> Vec<DependencyNode> {
+        DependencyGraph::get_unoptimized_nodes(self)
+            .into_iter().map(|n| n.clone()).collect()
+    }
+
+    /// Check if any nodes are marked unoptimized.
+    #[pyo3(name = "has_unoptimized_nodes")]
+    fn py_has_unoptimized_nodes(&self) -> bool {
+        DependencyGraph::has_unoptimized_nodes(self)
+    }
+
+    /// Set graph-level metadata.
+    #[pyo3(name = "set_metadata")]
+    fn py_set_metadata(&mut self, key: String, value: String) {
+        DependencyGraph::set_metadata(self, key, value);
+    }
+
+    /// Get graph-level metadata.
+    #[pyo3(name = "get_metadata")]
+    fn py_get_metadata(&self, key: &str) -> Option<String> {
+        DependencyGraph::get_metadata(self, key).cloned()
+    }
+
+    /// Freeze the graph. No new nodes or edges can be added.
+    /// Existing nodes remain mutable and can still be deleted.
+    #[pyo3(name = "freeze")]
+    fn py_freeze(&mut self) {
+        DependencyGraph::freeze(self);
+    }
+
+    /// Check if the graph is frozen.
+    #[pyo3(name = "is_frozen")]
+    fn py_is_frozen(&self) -> bool {
+        DependencyGraph::is_frozen(self)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DependencyGraph(nodes={}, edges={}, entry_points={})",
+            DependencyGraph::node_count(self),
+            DependencyGraph::edge_count(self),
+            DependencyGraph::entry_points(self).len()
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,7 +903,7 @@ mod tests {
         graph.add_edge(DependencyEdge::new(
             "app.main",
             "app.utils",
-            EdgeType::Import,
+            EdgeType::Import(),
             test_provenance(),
         ));
 
@@ -616,13 +923,13 @@ mod tests {
         graph.add_edge(DependencyEdge::new(
             "entry",
             "mod_a",
-            EdgeType::Import,
+            EdgeType::Import(),
             test_provenance(),
         ));
         graph.add_edge(DependencyEdge::new(
             "mod_a",
             "mod_b",
-            EdgeType::Import,
+            EdgeType::Import(),
             test_provenance(),
         ));
 
@@ -645,7 +952,7 @@ mod tests {
         graph.add_edge(DependencyEdge::new(
             "entry",
             "mod_a",
-            EdgeType::Import,
+            EdgeType::Import(),
             test_provenance(),
         ));
 
@@ -679,7 +986,7 @@ mod tests {
         graph.add_edge(DependencyEdge::new(
             "a",
             "nonexistent",
-            EdgeType::Import,
+            EdgeType::Import(),
             test_provenance(),
         ));
 
@@ -694,12 +1001,53 @@ mod tests {
         graph.add_edge(DependencyEdge::new(
             "entry",
             "mod",
-            EdgeType::Import,
+            EdgeType::Import(),
             test_provenance(),
         ));
 
         let diag = graph.node_diagnostic("mod").unwrap();
         assert!(diag.contains("mod"));
         assert!(diag.contains("python_module"));
+    }
+
+    #[test]
+    fn test_frozen_graph_rejects_new_nodes() {
+        let mut graph = DependencyGraph::new();
+        graph.add_node(DependencyNode::new("a", NodeType::PythonModule));
+        graph.freeze();
+
+        // Adding new nodes is rejected
+        assert!(!graph.add_node(DependencyNode::new("b", NodeType::PythonModule)));
+        assert_eq!(graph.node_count(), 1);
+
+        // Adding new edges is a no-op
+        graph.add_edge(DependencyEdge::new(
+            "a",
+            "b",
+            EdgeType::Import(),
+            test_provenance(),
+        ));
+        assert_eq!(graph.edge_count(), 0);
+
+        // Adding entry points is a no-op
+        graph.add_entry_point("a");
+        assert_eq!(graph.entry_points().len(), 0);
+
+        // Existing nodes can still be deleted
+        assert!(graph.delete_node("a"));
+        assert_eq!(graph.node_count(), 0);
+    }
+
+    #[test]
+    fn test_frozen_graph_allows_mutation() {
+        let mut graph = DependencyGraph::new();
+        graph.add_node(DependencyNode::new("a", NodeType::PythonModule));
+        graph.freeze();
+
+        // Mutation of existing nodes still works
+        let node = graph.get_node_mut("a").unwrap();
+        node.required = true;
+        node.content = Some("x".into());
+        assert!(graph.get_node("a").unwrap().required);
     }
 }

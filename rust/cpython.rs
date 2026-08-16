@@ -1036,7 +1036,7 @@ mod tests {
             "pathlib".to_string(),
         ];
 
-        let result = registry.analyze_required_sources(&required);
+        let result = registry.analyze_required_sources(required.clone());
         assert!(!result.required_c_modules.is_empty());
         assert!(!result.required_c_sources.is_empty());
     }
@@ -1054,7 +1054,7 @@ mod tests {
     fn test_analysis_report() {
         let registry = CpythonModuleRegistry::new((3, 10));
         let required = vec!["json".to_string()];
-        let result = registry.analyze_required_sources(&required);
+        let result = registry.analyze_required_sources(required.clone());
         let report = result.format_report();
         assert!(report.contains("CPython Module Analysis Report"));
         assert!(report.contains("Required C modules"));
@@ -1064,7 +1064,7 @@ mod tests {
     fn test_exclusion_percentage() {
         let registry = CpythonModuleRegistry::new((3, 10));
         let required = vec!["json".to_string()];
-        let result = registry.analyze_required_sources(&required);
+        let result = registry.analyze_required_sources(required.clone());
         let pct = result.exclusion_percentage();
         assert!(pct >= 0.0);
         assert!(pct <= 100.0);

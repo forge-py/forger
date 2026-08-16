@@ -6,6 +6,8 @@
 use std::fs;
 use std::path::PathBuf;
 
+use pyo3::prelude::*;
+
 use crate::depgraph::{DependencyGraph, DependencyNode, DependencyEdge};
 use crate::result::{ForgerError, ForgerResult};
 
@@ -16,6 +18,7 @@ use crate::result::{ForgerError, ForgerResult};
 /// - `edges.json` — serialized edges
 /// - `entrypoints.json` — entry point IDs
 /// - `metadata.json` — graph-level metadata
+#[pyclass]
 pub struct GraphStore {
     base_path: PathBuf,
 }
@@ -131,10 +134,51 @@ impl GraphStore {
     }
 }
 
+// --- PyO3 bindings ---
+
+#[pymethods]
+impl GraphStore {
+    #[new]
+    fn py_new(base_path: String) -> Self {
+        GraphStore::new(PathBuf::from(base_path))
+    }
+
+    /// Persist an entire DependencyGraph to disk.
+    #[pyo3(name = "flush")]
+    fn _py_flush(&self, graph: &DependencyGraph) -> PyResult<()> {
+        GraphStore::flush(self, graph)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Load a DependencyGraph from disk.
+    #[pyo3(name = "load")]
+    fn _py_load(&self) -> PyResult<DependencyGraph> {
+        GraphStore::load(self)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Check if the store has persisted data.
+    #[pyo3(name = "is_empty")]
+    fn _py_is_empty(&self) -> bool {
+        GraphStore::is_empty(self)
+    }
+
+    /// Clear all persisted data.
+    #[pyo3(name = "clear")]
+    fn _py_clear(&self) -> PyResult<()> {
+        GraphStore::clear(self)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("GraphStore(path={})", self.base_path.display())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::depgraph::{NodeType, EdgeType};
+    use crate::depgraph::{NodeType, EdgeType, EdgeProvenance};
     use tempfile::TempDir;
 
     #[test]
@@ -154,7 +198,7 @@ mod tests {
         graph.add_edge(DependencyEdge::new(
             "main.py",
             "utils.py",
-            EdgeType::Import,
+            EdgeType::Import(),
             EdgeProvenance {
                 source: Some(("main.py".into(), 1)),
                 discovered_by: "test".into(),

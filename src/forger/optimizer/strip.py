@@ -16,9 +16,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from forger.core import DependencyNode
-    from forger.optimizer import PluginContext
+    from forger.optimizer import BasePlugin, PluginContext
 
 logger = logging.getLogger(__name__)
+
+from forger.optimizer import BasePlugin
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +168,7 @@ def strip_comments_and_docstrings(source: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-class StripCommentsDocstrings:
+class StripCommentsDocstrings(BasePlugin):
     """LLVM/GCC-style optimizer pass that strips comments and docstrings.
 
     This runs as a POST-order plugin, after framework plugins have
@@ -182,7 +184,7 @@ class StripCommentsDocstrings:
     """
 
     name = "strip_comments_docstrings"
-    order = "post"
+    enforce = "post"
 
     def __init__(
         self,

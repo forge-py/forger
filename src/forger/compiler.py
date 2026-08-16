@@ -444,6 +444,7 @@ class Compiler:
         self.graph: DependencyGraph | None = None  # type: ignore[name-defined]
         self.source_files: list[Path] = []
         self._plugin_context: object = None
+        self._plugin_runner: object = None
 
     @classmethod
     def forge_from_vfs(
@@ -470,9 +471,56 @@ class Compiler:
 
     def analyze(self) -> None:
         """Run static analysis on the project."""
-        from forger.core import DependencyGraph, DependencyNode, NodeType
+        from forger.core import DependencyGraph, DependencyNode, NodeType, HAS_RUST_CORE
 
         logger.info("Starting analysis of %s", self.project_root)
+
+        # Try to use Rust GraphBuilder for parallel discovery + content loading
+        if HAS_RUST_CORE:
+            self._analyze_with_rust()
+        else:
+            self._analyze_pure_python()
+
+        # Analyze imports (adds nodes and edges for discovered imports)
+        self._analyze_imports()
+
+        # Analyze dynamic imports
+        self._analyze_dynamic_imports()
+
+        # Analyze resources
+        self._analyze_resources()
+
+        # Freeze the graph after all analysis — no new nodes/edges may be
+        # added during plugin and optimizer passes, but existing nodes can
+        # still be mutated (metadata, content, required flag, etc.)
+        if self.graph:
+            self.graph.freeze()
+            logger.info("Graph frozen: %d nodes, %d edges",
+                        self.graph.node_count(), self.graph.edge_count())
+
+    def _analyze_with_rust(self) -> None:
+        """Use Rust GraphBuilder for parallel file discovery with content."""
+        from forger.forger_core import GraphBuilder  # type: ignore[import-not-found, import-untyped, missing-import]
+        from forger.core import DependencyGraph  # wrapper
+
+        logger.info("Using Rust GraphBuilder for parallel discovery")
+
+        # Build graph with parallel filesystem discovery
+        builder = GraphBuilder(str(self.project_root), self.entry_point)
+        rs_graph = builder.build_parallel()  # type: ignore[attr-defined]
+        self.graph = DependencyGraph(_rs=rs_graph)
+        logger.info(
+            "Rust discovery: %d nodes",
+            self.graph.node_count(),
+        )
+
+        # Collect source file paths for the Python analyzers
+        self.source_files = self._discover_source_files()
+        logger.info("Discovered %d Python source files", len(self.source_files))
+
+    def _analyze_pure_python(self) -> None:
+        """Pure Python fallback for file discovery and graph construction."""
+        from forger.core import DependencyNode, NodeType
 
         # Create dependency graph
         self.graph = DependencyGraph()
@@ -482,15 +530,6 @@ class Compiler:
         # Discover Python source files
         self.source_files = self._discover_source_files()
         logger.info("Discovered %d Python source files", len(self.source_files))
-
-        # Analyze imports
-        self._analyze_imports()
-
-        # Analyze dynamic imports
-        self._analyze_dynamic_imports()
-
-        # Analyze resources
-        self._analyze_resources()
 
     def _analyze_imports(self) -> None:
         """Analyze static imports across all source files."""
@@ -639,6 +678,11 @@ class Compiler:
         self._plugin_context = plugin_ctx
 
         runner = PluginRunner(plugins)
+        self._plugin_runner = runner
+
+        # --- Build phase ---
+        runner.run_config(plugin_ctx)
+        runner.run_config_resolved(plugin_ctx)
         runner.run_build_start(plugin_ctx)
         runner.run_build_graph(plugin_ctx)
         runner.run_before_shake(plugin_ctx)
@@ -648,6 +692,7 @@ class Compiler:
 
         # Run post-shake hooks (dead code detection, optimizer passes)
         runner.run_after_shake(plugin_ctx)
+        runner.run_build_end(plugin_ctx)
 
         # Log unoptimized dependencies discovered by plugins
         unopt = plugin_ctx.unoptimized_dependencies
@@ -666,6 +711,13 @@ class Compiler:
         Copies all reachable Python modules and resources into the output
         directory, preserving the module structure as the VFS layout.
         Also copies required third-party packages from .venv into dist/.venv.
+
+        Output generation hooks are invoked at the appropriate phases:
+        - ``render_start``: Before any files are written.
+        - ``render_chunk``: For each module chunk before writing.
+        - ``generate_bundle``: After all files are staged, before writing.
+        - ``write_bundle``: After all files are written.
+        - ``close_bundle``: Final cleanup.
         """
         if not self.graph:
             raise RuntimeError("Analysis not yet performed")
@@ -679,6 +731,12 @@ class Compiler:
 
         # Mark reachable nodes
         self.graph.mark_reachable_required()
+
+        # Invoke render_start hook
+        runner = getattr(self, "_plugin_runner", None)
+        plugin_ctx = getattr(self, "_plugin_context", None)
+        if runner and plugin_ctx:
+            runner.run_render_start(plugin_ctx)
 
         # Clean and create output directory
         import shutil
@@ -698,6 +756,9 @@ class Compiler:
                 if node is not None and node.required:
                     any_required = True
                     break
+
+        # Build a bundle dict for the generate_bundle hook
+        bundle: dict[str, dict[str, object]] = {}
 
         for source_file in self.source_files:
             module_name = self._path_to_module(source_file)
@@ -727,9 +788,27 @@ class Compiler:
             # Prefer optimized node.content if available, else read from disk
             node = self.graph.get_node(module_name)
             if node is not None and node.get_content() is not None:
-                dest.write_text(node.get_content(), encoding="utf-8")
+                code = node.get_content()
             else:
-                dest.write_bytes(source_file.read_bytes())
+                code = source_file.read_text(encoding="utf-8")
+
+            # Invoke render_chunk hook
+            if runner and plugin_ctx:
+                chunk = {
+                    "code": code,
+                    "module_id": module_name,
+                    "is_entry": module_name == self.entry_point,
+                }
+                chunk = runner.run_render_chunk(chunk, plugin_ctx)
+                if chunk:
+                    code = chunk.get("code", code)
+
+            dest.write_text(code, encoding="utf-8")
+            bundle[str(rel_path)] = {
+                "code": code,
+                "module_id": module_name,
+                "is_entry": module_name == self.entry_point,
+            }
             copied += 1
 
         # Copy resources from include patterns (templates, locale, static, etc.)
@@ -737,6 +816,31 @@ class Compiler:
 
         # Copy resource nodes from the dependency graph (added by plugins)
         graph_resource_count = self._copy_graph_resources()
+
+        # Invoke generate_bundle hook
+        if runner and plugin_ctx:
+            build_options = {
+                "output_dir": str(self.output_path),
+                "entry_point": self.entry_point,
+                "module_count": copied,
+                "resource_count": resource_count + graph_resource_count,
+            }
+            runner.run_generate_bundle(build_options, bundle, plugin_ctx)
+
+            # Write emitted files
+            emitted = plugin_ctx.emitted_files
+            if emitted:
+                for file_info in emitted:
+                    name = file_info.get("name", "unnamed")
+                    source = file_info.get("source", "")
+                    if source:
+                        dest_file = self.output_path / name
+                        dest_file.parent.mkdir(parents=True, exist_ok=True)
+                        if isinstance(source, bytes):
+                            dest_file.write_bytes(source)
+                        else:
+                            dest_file.write_text(source, encoding="utf-8")
+                logger.info("Wrote %d emitted files", len(emitted))
 
         # Determine required third-party packages from import analysis
         imported_modules = self._get_imported_modules()
@@ -748,6 +852,11 @@ class Compiler:
             venv_copied = self._resolve_and_copy_venv(imported_modules)
         else:
             venv_copied = 0
+
+        # Invoke write_bundle and close_bundle hooks
+        if runner and plugin_ctx:
+            runner.run_write_bundle(self.output_path, plugin_ctx)
+            runner.run_close_bundle(plugin_ctx)
 
         logger.info(
             "VFS generated: %d modules, %d resources, %d venv files",

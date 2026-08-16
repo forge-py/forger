@@ -58,12 +58,25 @@ fn check_build_config_py(target: String) -> PyResult<BuildConfigResult> {
 }
 
 #[pymodule]
-fn forger(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn forger_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction_bound!(content_hash_bytes_py)(m).unwrap())?;
     m.add_function(wrap_pyfunction_bound!(check_build_config_py)(m).unwrap())?;
     m.add_class::<BuildConfigResult>()?;
     m.add_class::<CpythonModuleRegistry>()?;
     m.add_class::<CpythonAnalysisResult>()?;
     m.add_class::<CpythonBuildConfig>()?;
+
+    // Dependency graph types
+    m.add_class::<NodeType>()?;
+    m.add_class::<EdgeType>()?;
+    m.add_class::<EdgeProvenance>()?;
+    m.add_class::<DependencyNode>()?;
+    m.add_class::<DependencyEdge>()?;
+    m.add_class::<DependencyGraph>()?;
+
+    // Graph builder and store
+    m.add_class::<GraphBuilder>()?;
+    m.add_class::<GraphStore>()?;
+
     Ok(())
 }
