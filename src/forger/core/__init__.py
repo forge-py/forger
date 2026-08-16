@@ -11,9 +11,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from typing import Any
-
 logger = logging.getLogger(__name__)
 
 # Try to import the compiled Rust extension
@@ -36,13 +33,138 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# When Rust core is available, wrap the Rust types so they present the same
-# API as the pure-Python fallback (e.g., DependencyNode.new(), .with_metadata()).
+# Type definitions for static analysis.
+#
+# The pure-Python dataclasses are the canonical type definitions.  At runtime
+# either the Rust wrappers (when available) or these dataclasses are used,
+# but the type checker always sees the dataclasses so there is a single
+# source of truth for types.
+# ---------------------------------------------------------------------------
+
+if TYPE_CHECKING:
+
+    @dataclass
+    class EdgeProvenance:
+        """Provenance information for a dependency edge."""
+
+        source: tuple[str, int] | None = None
+        discovered_by: str = ""
+        description: str | None = None
+
+    @dataclass
+    class DependencyEdge:
+        """Edge in the dependency graph."""
+
+        from_node: str
+        to_node: str
+        edge_type: str
+        provenance: EdgeProvenance | None = None
+
+        @classmethod
+        def new(
+            cls,
+            from_node: str,
+            to_node: str,
+            edge_type: str,
+            provenance: EdgeProvenance | None = None,
+        ) -> DependencyEdge: ...
+
+    @dataclass
+    class DependencyNode:
+        """Node in the dependency graph."""
+
+        id: str
+        node_type: str
+        path: Path | None = None
+        metadata: dict[str, str] = field(default_factory=dict)
+        required: bool = False
+        conservative: bool = False
+        target: str | None = None
+        unoptimized: bool = False
+        content: str | None = None
+
+        @classmethod
+        def new(cls, node_id: str, node_type: str) -> DependencyNode: ...
+
+        def with_metadata(self, key: str, value: str) -> DependencyNode: ...
+
+        def mark_unoptimized(self) -> DependencyNode: ...
+
+        def set_content(self, content: str) -> None: ...
+
+        def get_content(self) -> str | None: ...
+
+    class NodeType:
+        """Node types for the dependency graph."""
+
+        PythonModule = "python_module"
+        PythonPackage = "python_package"
+        StdlibModule = "stdlib_module"
+        StdlibPackage = "stdlib_package"
+        NativeExtension = "native_extension"
+        NativeLibrary = "native_library"
+        Resource = "resource"
+        Configuration = "configuration"
+        EntryPoint = "entry_point"
+        VfsPath = "vfs_path"
+        DynamicImport = "dynamic_import"
+        ExternalPackage = "external_package"
+
+    class EdgeType:
+        """Edge types for the dependency graph."""
+
+        Import = "import"
+        FromImport = "from_import"
+        RelativeImport = "relative_import"
+        DynamicImport = "dynamic_import"
+        ResourceDependency = "resource"
+        NativeDependency = "native"
+        ConfigDependency = "config"
+        PluginDependency = "plugin"
+        EntryPointDependency = "entry_point"
+        StdlibDependency = "stdlib"
+        Indirect = "indirect"
+        UnoptimizedDependency = "unoptimized"
+
+    class DependencyGraph:
+        """Dependency graph."""
+
+        def add_node(self, node: DependencyNode) -> bool: ...
+        def get_node(self, node_id: str) -> DependencyNode | None: ...
+        def get_node_mut(self, node_id: str) -> DependencyNode | None: ...
+        def add_edge(self, edge: DependencyEdge) -> None: ...
+        def add_entry_point(self, node_id: str) -> None: ...
+        def entry_points(self) -> list[str]: ...
+        def node_count(self) -> int: ...
+        def edge_count(self) -> int: ...
+        def all_nodes(self) -> dict[str, DependencyNode]: ...
+        def dependencies_of(self, node_id: str) -> list[str]: ...
+        def dependents_of(self, node_id: str) -> list[str]: ...
+        def nodes_by_type(self, node_type: str) -> list[DependencyNode]: ...
+        def find_reachable(self) -> set[str]: ...
+        def mark_reachable_required(self) -> None: ...
+        def prune_unreachable(self) -> None: ...
+        def validate(self) -> bool: ...
+        def merge(self, other: DependencyGraph) -> None: ...
+        def get_unoptimized_nodes(self) -> list[DependencyNode]: ...
+        def has_unoptimized_nodes(self) -> bool: ...
+        def is_dead(self, node_id: str) -> bool: ...
+        def find_dead_nodes(self) -> list[str]: ...
+        def delete_node(self, node_id: str) -> bool: ...
+        def freeze(self) -> None: ...
+        def is_frozen(self) -> bool: ...
+
+        @property
+        def nodes(self) -> dict[str, DependencyNode]: ...
+
+
+# ---------------------------------------------------------------------------
+# Runtime implementations
 # ---------------------------------------------------------------------------
 
 if HAS_RUST_CORE:
 
-    class EdgeProvenance:
+    class EdgeProvenance:  # type: ignore[no-redef]
         """Thin wrapper around Rust EdgeProvenance."""
 
         __slots__ = ("_rs",)
@@ -69,7 +191,7 @@ if HAS_RUST_CORE:
         def description(self):
             return getattr(self._rs, "description", None)
 
-    class DependencyNode:
+    class DependencyNode:  # type: ignore[no-redef]
         """Thin wrapper around Rust DependencyNode."""
 
         __slots__ = ("_rs",)
@@ -89,7 +211,6 @@ if HAS_RUST_CORE:
         @classmethod
         def new(cls, node_id: str, node_type) -> "DependencyNode":
             if isinstance(node_type, str):
-                # Map string node types to Rust enum values
                 type_map = {
                     "python_module": _RustNodeType.PythonModule,
                     "python_package": _RustNodeType.PythonPackage,
@@ -132,7 +253,7 @@ if HAS_RUST_CORE:
         def get_content(self) -> str | None:
             return self._rs.content
 
-    class DependencyEdge:
+    class DependencyEdge:  # type: ignore[no-redef]
         """Thin wrapper around Rust DependencyEdge."""
 
         __slots__ = ("_rs",)
@@ -146,7 +267,6 @@ if HAS_RUST_CORE:
             edge_type_raw = kwargs.get("edge_type", "import")
             provenance_raw = kwargs.get("provenance")
 
-            # Map string edge type to Rust enum
             if isinstance(edge_type_raw, str):
                 et_map = {
                     "import": _RustEdgeType.Import,
@@ -165,7 +285,6 @@ if HAS_RUST_CORE:
                 edge_cls = et_map.get(edge_type_raw, _RustEdgeType.Import)
                 edge_type = edge_cls()
             elif isinstance(edge_type_raw, type):
-                # PyO3 enum variants are classes; instantiate them
                 edge_type = edge_type_raw()
             else:
                 edge_type = edge_type_raw
@@ -200,7 +319,7 @@ if HAS_RUST_CORE:
             rust_name = {"from_node": "from", "to_node": "to"}.get(name, name)
             return getattr(self._rs, rust_name)
 
-    class NodeType:
+    class NodeType:  # type: ignore[no-redef]
         """Node types — string constants compatible with pure-Python fallback."""
 
         PythonModule = "python_module"
@@ -216,7 +335,7 @@ if HAS_RUST_CORE:
         DynamicImport = "dynamic_import"
         ExternalPackage = "external_package"
 
-    class EdgeType:
+    class EdgeType:  # type: ignore[no-redef]
         """Edge types — string constants compatible with pure-Python fallback."""
 
         Import = "import"
@@ -232,7 +351,7 @@ if HAS_RUST_CORE:
         Indirect = "indirect"
         UnoptimizedDependency = "unoptimized"
 
-    class DependencyGraph:
+    class DependencyGraph:  # type: ignore[no-redef]
         """Thin wrapper around Rust DependencyGraph."""
 
         __slots__ = ("_rs",)
@@ -251,6 +370,10 @@ if HAS_RUST_CORE:
                 super().__setattr__(name, value)
             else:
                 setattr(self._rs, name, value)
+
+        @property
+        def nodes(self):
+            return {nid: self.get_node(nid) for nid in self._rs.nodes}
 
         def get_node(self, node_id: str) -> DependencyNode | None:
             rs_node = self._rs.get_node(node_id)
@@ -344,6 +467,7 @@ if HAS_RUST_CORE:
             """Check if the graph is frozen."""
             return self._rs.is_frozen()
 
+
 # ---------------------------------------------------------------------------
 # Pure Python fallback (used when Rust core is not available)
 # ---------------------------------------------------------------------------
@@ -351,7 +475,7 @@ if HAS_RUST_CORE:
 if not HAS_RUST_CORE:
 
     @dataclass
-    class EdgeProvenance:
+    class EdgeProvenance:  # type: ignore[no-redef]
         """Provenance information for a dependency edge."""
 
         source: tuple[str, int] | None = None
@@ -359,7 +483,7 @@ if not HAS_RUST_CORE:
         description: str | None = None
 
     @dataclass
-    class DependencyEdge:
+    class DependencyEdge:  # type: ignore[no-redef]
         """Edge in the dependency graph."""
 
         from_node: str
@@ -378,7 +502,7 @@ if not HAS_RUST_CORE:
             return cls(from_node, to_node, edge_type, provenance)
 
     @dataclass
-    class DependencyNode:
+    class DependencyNode:  # type: ignore[no-redef]
         """Node in the dependency graph."""
 
         id: str
@@ -412,7 +536,7 @@ if not HAS_RUST_CORE:
             """Get the source content of this node."""
             return self.content
 
-    class NodeType:
+    class NodeType:  # type: ignore[no-redef]
         """Node types for the dependency graph."""
 
         PythonModule = "python_module"
@@ -428,7 +552,7 @@ if not HAS_RUST_CORE:
         DynamicImport = "dynamic_import"
         ExternalPackage = "external_package"
 
-    class EdgeType:
+    class EdgeType:  # type: ignore[no-redef]
         """Edge types for the dependency graph."""
 
         Import = "import"
@@ -444,7 +568,7 @@ if not HAS_RUST_CORE:
         Indirect = "indirect"
         UnoptimizedDependency = "unoptimized"
 
-    class DependencyGraph:
+    class DependencyGraph:  # type: ignore[no-redef]
         """Dependency graph — pure Python fallback implementation."""
 
         def __init__(self) -> None:
@@ -453,6 +577,10 @@ if not HAS_RUST_CORE:
             self._edges_to: dict[str, list[DependencyEdge]] = {}
             self._entry_points: list[str] = []
             self._frozen: bool = False
+
+        @property
+        def nodes(self) -> dict[str, DependencyNode]:
+            return dict(self._nodes)
 
         def add_node(self, node: DependencyNode) -> bool:
             if self._frozen:
@@ -515,7 +643,6 @@ if not HAS_RUST_CORE:
 
         def mark_reachable_required(self) -> None:
             reachable = self.find_reachable()
-            # Unoptimized nodes are always required — they bypass tree-shaking
             for node in self._nodes.values():
                 if node.unoptimized:
                     reachable.add(node.id)
@@ -532,11 +659,9 @@ if not HAS_RUST_CORE:
             }
 
         def validate(self) -> bool:
-            # Entry points must have corresponding nodes
             for ep in self._entry_points:
                 if ep not in self._nodes:
                     return False
-            # Edge endpoints must have corresponding nodes
             for edges in self._edges_from.values():
                 for edge in edges:
                     if edge.from_node not in self._nodes:
@@ -555,15 +680,12 @@ if not HAS_RUST_CORE:
                 self.add_entry_point(ep)
 
         def get_unoptimized_nodes(self) -> list[DependencyNode]:
-            """Return all nodes marked as unoptimized."""
             return [n for n in self._nodes.values() if n.unoptimized]
 
         def has_unoptimized_nodes(self) -> bool:
-            """Check if any nodes are marked unoptimized."""
             return any(n.unoptimized for n in self._nodes.values())
 
         def is_dead(self, node_id: str) -> bool:
-            """Check if a node is dead (not reachable and not unoptimized)."""
             node = self._nodes.get(node_id)
             if node is None:
                 return True
@@ -572,9 +694,7 @@ if not HAS_RUST_CORE:
             return node_id not in self.find_reachable()
 
         def find_dead_nodes(self) -> list[str]:
-            """Return all dead (unreachable) node IDs."""
             reachable = self.find_reachable()
-            # Unoptimized nodes are never considered dead
             dead: list[str] = []
             for node_id, node in self._nodes.items():
                 if node.unoptimized:
@@ -584,11 +704,9 @@ if not HAS_RUST_CORE:
             return dead
 
         def get_node_mut(self, node_id: str) -> DependencyNode | None:
-            """Get a mutable reference to a node by ID."""
             return self._nodes.get(node_id)
 
         def delete_node(self, node_id: str) -> bool:
-            """Remove a node from the graph. Returns True if the node existed."""
             if node_id not in self._nodes:
                 return False
             del self._nodes[node_id]
@@ -598,9 +716,7 @@ if not HAS_RUST_CORE:
             return True
 
         def freeze(self) -> None:
-            """Freeze the graph: no new nodes/edges can be added."""
             self._frozen = True
 
         def is_frozen(self) -> bool:
-            """Check if the graph is frozen."""
             return getattr(self, "_frozen", False)
