@@ -13,6 +13,7 @@ in Python, with heavy lifting delegated to the Rust core.
 
 from __future__ import annotations
 
+import argparse
 import logging
 import shutil
 import sys
@@ -253,178 +254,201 @@ def setup_logging(verbose: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Entry point — Python CLI that delegates heavy lifting to forger_core (Rust).
+# Argparse setup
 # ---------------------------------------------------------------------------
 
 
-def run() -> None:
-    """Entry point for the forger command.
+def _build_parser() -> argparse.ArgumentParser:
+    """Construct the argparse parser with all subcommands."""
+    from forger import __version__
 
-    All argument parsing and dispatch happens in Python. Heavy-lifting
-    operations (hashing, graph construction, VFS generation) are
-    delegated to the forger_core Rust library via PyO3.
-    """
-    args = sys.argv[1:]
-    if not args:
-        print_usage()
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        prog="forger",
+        description="Forger — Python application compiler and bundler",
+    )
+    parser.add_argument(
+        "-V", "--version",
+        action="version",
+        version=f"forger {__version__}",
+    )
 
-    command = args[0]
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    if command == "--version" or command == "-V":
-        from forger import __version__
+    # --- compile ---
+    compile_parser = subparsers.add_parser(
+        "compile",
+        help="Analyze and compile a Python project into a VFS directory",
+    )
+    compile_parser.add_argument(
+        "source", nargs="?", default=".",
+        help="Source directory (default: .)",
+    )
+    compile_parser.add_argument(
+        "-o", "--output", default="dist",
+        help="Output path for VFS artifact (default: dist)",
+    )
+    compile_parser.add_argument(
+        "-e", "--entry-point", default="main",
+        help="Entry point module (default: main)",
+    )
+    compile_parser.add_argument(
+        "--venv", default=None,
+        help="Virtual environment path",
+    )
+    compile_parser.add_argument(
+        "--forger-py", default=None,
+        help="Path to forger.py config",
+    )
+    compile_parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Enable verbose output",
+    )
 
-        print(f"forger {__version__}")
-        return
+    # --- forge ---
+    forge_parser = subparsers.add_parser(
+        "forge",
+        help="Package the VFS directory into a .forge artifact",
+    )
+    forge_parser.add_argument(
+        "vfs_dir", nargs="?", default="dist",
+        help="VFS directory to package (default: dist)",
+    )
+    forge_parser.add_argument(
+        "-o", "--output", default="app.forge",
+        help="Output .forge artifact path (default: app.forge)",
+    )
+    forge_parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Enable verbose output",
+    )
 
-    if command == "--help" or command == "-h":
-        print_usage()
-        return
+    # --- build ---
+    build_parser = subparsers.add_parser(
+        "build",
+        help="Build a platform-specific executable from a .forge artifact",
+    )
+    build_parser.add_argument(
+        "artifact",
+        help="Path to .forge artifact",
+    )
+    build_parser.add_argument(
+        "-t", "--target", default="windows-x64",
+        help="Target platform (default: windows-x64)",
+    )
+    build_parser.add_argument(
+        "-o", "--output", default=None,
+        help="Output directory",
+    )
+    build_parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Enable verbose output",
+    )
 
-    if command == "compile":
-        parsed = _parse_compile_args(args[1:])
-        run_compile(**parsed)  # pyrefly: ignore[bad-argument-type]
-    elif command == "forge":
-        parsed = _parse_forge_args(args[1:])
-        run_forge(**parsed)  # pyrefly: ignore[bad-argument-type]
-    elif command == "build":
-        parsed = _parse_build_args(args[1:])
-        run_build(**parsed)  # pyrefly: ignore[bad-argument-type]
-    elif command == "info":
-        parsed = _parse_info_args(args[1:])
-        run_info(**parsed)  # pyrefly: ignore[bad-argument-type]
-    elif command == "build-config":
-        _run_build_config(args[1:])
-    elif command == "cpython":
-        _run_cpython(args[1:])
-    else:
-        print(f"Error: unknown command '{command}'", file=sys.stderr)
-        print_usage()
-        sys.exit(1)
+    # --- info ---
+    info_parser = subparsers.add_parser(
+        "info",
+        help="Show information about a .forge artifact",
+    )
+    info_parser.add_argument(
+        "artifact",
+        help="Path to .forge artifact",
+    )
 
+    # --- build-config check ---
+    build_config_parser = subparsers.add_parser(
+        "build-config",
+        help="Build configuration subcommands",
+    )
+    build_config_sub = build_config_parser.add_subparsers(dest="build_config_command")
+    check_parser = build_config_sub.add_parser("check", help="Check if required build tools are present")
+    check_parser.add_argument(
+        "-t", "--target", default="windows-x64",
+        help="Target platform (default: windows-x64)",
+    )
 
-def _parse_compile_args(args: list[str]) -> dict[str, object]:
-    result: dict[str, object] = {
-        "source": ".",
-        "output": "dist",
-        "entry_point": "main",
-        "venv": None,
-        "forger_py": None,
-        "verbose": False,
-    }
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--help" or a == "-h":
-            print(
-                "Usage: forger compile [SOURCE] [OPTIONS]\n"
-                "\n"
-                "Options:\n"
-                "  -o, --output TEXT        Output path for VFS artifact (default: dist)\n"
-                "  -e, --entry-point TEXT   Entry point module (default: main)\n"
-                "  --venv TEXT              Virtual environment path\n"
-                "  --forger-py TEXT         Path to forger.py config\n"
-                "  -v, --verbose            Enable verbose output\n"
-                "  -h, --help               Show this message\n"
-            )
-            sys.exit(0)
-        elif a == "--output" or a == "-o":
-            i += 1
-            result["output"] = args[i] if i < len(args) else "dist"
-        elif a == "--entry-point" or a == "-e":
-            i += 1
-            result["entry_point"] = args[i] if i < len(args) else "main"
-        elif a == "--venv":
-            i += 1
-            result["venv"] = args[i] if i < len(args) else None
-        elif a == "--forger-py":
-            i += 1
-            result["forger_py"] = args[i] if i < len(args) else None
-        elif a == "--verbose" or a == "-v":
-            result["verbose"] = True
-        elif not a.startswith("-"):
-            result["source"] = a
-        i += 1
-    return result
+    # --- cpython analyze ---
+    cpython_parser = subparsers.add_parser(
+        "cpython",
+        help="CPython module analysis and minimal build configuration",
+    )
+    cpython_sub = cpython_parser.add_subparsers(dest="cpython_command")
 
+    cpython_analyze = cpython_sub.add_parser(
+        "analyze",
+        help="Analyze which CPython modules are required",
+    )
+    cpython_analyze.add_argument(
+        "modules", nargs="+",
+        help="Module names to analyze",
+    )
+    cpython_analyze.add_argument(
+        "--version", default="3.12",
+        help="CPython version (default: 3.12)",
+    )
 
-def _parse_forge_args(args: list[str]) -> dict[str, object]:
-    result: dict[str, object] = {
-        "vfs_dir": "dist",
-        "output": "app.forge",
-        "verbose": False,
-    }
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--output" or a == "-o":
-            i += 1
-            result["output"] = args[i] if i < len(args) else "app.forge"
-        elif a == "--verbose" or a == "-v":
-            result["verbose"] = True
-        elif not a.startswith("-"):
-            result["vfs_dir"] = a
-        i += 1
-    return result
+    cpython_build_config = cpython_sub.add_parser(
+        "build-config",
+        help="Generate a minimal CPython build configuration",
+    )
+    cpython_build_config.add_argument(
+        "modules", nargs="+",
+        help="Module names to analyze",
+    )
+    cpython_build_config.add_argument(
+        "-t", "--target", default="windows-x64",
+        help="Target platform (default: windows-x64)",
+    )
+    cpython_build_config.add_argument(
+        "--version", default="3.12",
+        help="CPython version (default: 3.12)",
+    )
 
-
-def _parse_build_args(args: list[str]) -> dict[str, object]:
-    result: dict[str, object] = {
-        "artifact": "",
-        "target": "windows-x64",
-        "output": None,
-        "verbose": False,
-    }
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--help" or a == "-h":
-            print(
-                "Usage: forger build ARTIFACT [OPTIONS]\n"
-                "\n"
-                "Options:\n"
-                "  -t, --target TEXT   Target platform (default: windows-x64)\n"
-                "  -o, --output TEXT   Output directory\n"
-                "  -v, --verbose       Enable verbose output\n"
-                "  -h, --help          Show this message\n"
-            )
-            sys.exit(0)
-        elif a == "--target" or a == "-t":
-            i += 1
-            result["target"] = args[i] if i < len(args) else "windows-x64"
-        elif a == "--output" or a == "-o":
-            i += 1
-            result["output"] = args[i] if i < len(args) else None
-        elif a == "--verbose" or a == "-v":
-            result["verbose"] = True
-        elif not a.startswith("-"):
-            result["artifact"] = a
-        i += 1
-    return result
-
-
-def _parse_info_args(args: list[str]) -> dict[str, object]:
-    result: dict[str, object] = {"artifact": ""}
-    for a in args:
-        if not a.startswith("-"):
-            result["artifact"] = a
-    return result
+    return parser
 
 
-def _run_build_config(args: list[str]) -> None:
-    if not args or args[0] != "check":
+# ---------------------------------------------------------------------------
+# Command callbacks
+# ---------------------------------------------------------------------------
+
+
+def _on_compile(args: argparse.Namespace) -> None:
+    run_compile(
+        source=args.source,
+        output=args.output,
+        entry_point=args.entry_point,
+        venv=args.venv,
+        forger_py=args.forger_py,
+        verbose=args.verbose,
+    )
+
+
+def _on_forge(args: argparse.Namespace) -> None:
+    run_forge(
+        vfs_dir=args.vfs_dir,
+        output=args.output,
+        verbose=args.verbose,
+    )
+
+
+def _on_build(args: argparse.Namespace) -> None:
+    run_build(
+        artifact=args.artifact,
+        target=args.target,
+        output=args.output,
+        verbose=args.verbose,
+    )
+
+
+def _on_info(args: argparse.Namespace) -> None:
+    run_info(artifact=args.artifact)
+
+
+def _on_build_config(args: argparse.Namespace) -> None:
+    if not hasattr(args, "build_config_command") or args.build_config_command != "check":
         print("Error: unknown build-config subcommand. Use 'check'.", file=sys.stderr)
         sys.exit(1)
 
-    target = "windows-x64"
-    i = 1
-    while i < len(args):
-        a = args[i]
-        if a == "--target" or a == "-t":
-            i += 1
-            target = args[i] if i < len(args) else "windows-x64"
-        i += 1
-
+    target = getattr(args, "target", "windows-x64")
     try:
         from forger_core import check_build_config  # type: ignore[import-not-found, import-untyped, missing-import]
 
@@ -433,28 +457,25 @@ def _run_build_config(args: list[str]) -> None:
         if result.has_issues():
             sys.exit(1)
     except ImportError:
-        # Rust core not available — do a basic Python-level check
         _build_config_check_python(target)
 
 
 def _build_config_check_python(target: str) -> None:
     """Fallback build-config check when Rust core is not available."""
-    import shutil
     import subprocess
-    import sys
 
-    os = target.split("-")[0]
+    os_name = target.split("-")[0]
     tools: list[tuple[str, bool]] = []
 
-    if os == "windows":
+    if os_name == "windows":
         tools.append(("MSVC Compiler (cl.exe)", shutil.which("cl.exe") is not None))
         tools.append(("MSVC Librarian (lib.exe)", shutil.which("lib.exe") is not None))
         tools.append(("MSVC Linker (link.exe)", shutil.which("link.exe") is not None))
-    elif os == "linux":
+    elif os_name == "linux":
         tools.append(("GCC", shutil.which("gcc") is not None))
         tools.append(("G++", shutil.which("g++") is not None))
         tools.append(("Make", shutil.which("make") is not None))
-    elif os == "macos":
+    elif os_name == "macos":
         try:
             result = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True)
             tools.append(("Xcode Command Line Tools", result.returncode == 0))
@@ -462,18 +483,17 @@ def _build_config_check_python(target: str) -> None:
             tools.append(("Xcode Command Line Tools", False))
         tools.append(("Clang", shutil.which("clang") is not None))
 
-    # Python check (all platforms)
     tools.append(("Python", sys.executable is not None and Path(sys.executable).exists()))
 
     passed = all(ok for _, ok in tools)
 
     print(f"Build Configuration Check: {target}")
-    print("─" * 50)
+    print("-" * 50)
     for name, ok in tools:
-        status = "✓" if ok else "✗"
+        status = "OK" if ok else "MISSING"
         state = "present" if ok else "missing"
-        print(f"  {status} {name}: {state}")
-    print("─" * 50)
+        print(f"  [{status}] {name}: {state}")
+    print("-" * 50)
     print(
         "Result: All required tools are available"
         if passed
@@ -484,72 +504,13 @@ def _build_config_check_python(target: str) -> None:
         sys.exit(1)
 
 
-def _run_cpython(args: list[str]) -> None:
-    if not args or args[0] not in ("analyze", "build-config"):
-        print(
-            "Error: unknown cpython subcommand. Use 'analyze' or 'build-config'.", file=sys.stderr
-        )
+def _on_cpython(args: argparse.Namespace) -> None:
+    if not hasattr(args, "cpython_command") or args.cpython_command not in ("analyze", "build-config"):
+        print("Error: unknown cpython subcommand. Use 'analyze' or 'build-config'.", file=sys.stderr)
         sys.exit(1)
 
-    subcommand = args[0]
-
-    if subcommand == "analyze":
-        _cpython_analyze(args[1:])
-    elif subcommand == "build-config":
-        _cpython_build_config(args[1:])
-
-
-def _cpython_analyze(args: list[str]) -> None:
-    modules = []
-    version = "3.12"
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--version":
-            i += 1
-            version = args[i] if i < len(args) else "3.12"
-        elif not a.startswith("-"):
-            modules.append(a)
-        i += 1
-
-    if not modules:
-        print("Error: no modules specified. Provide one or more module names.", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        from forger_core import CpythonModuleRegistry  # type: ignore[import-not-found, import-untyped, missing-import]
-
-        ver_parts = version.split(".")
-        major = int(ver_parts[0]) if len(ver_parts) > 0 else 3
-        minor = int(ver_parts[1]) if len(ver_parts) > 1 else 12
-        registry = CpythonModuleRegistry.new((major, minor))
-        analysis = registry.analyze_required_sources(modules)
-        print(analysis.format_report())
-    except ImportError:
-        print("Error: Rust core not available. Install with 'uv sync' and rebuild.")
-        sys.exit(1)
-
-
-def _cpython_build_config(args: list[str]) -> None:
-    modules = []
-    target = "windows-x64"
-    version = "3.12"
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--target" or a == "-t":
-            i += 1
-            target = args[i] if i < len(args) else "windows-x64"
-        elif a == "--version":
-            i += 1
-            version = args[i] if i < len(args) else "3.12"
-        elif not a.startswith("-"):
-            modules.append(a)
-        i += 1
-
-    if not modules:
-        print("Error: no modules specified. Provide one or more module names.", file=sys.stderr)
-        sys.exit(1)
+    modules = list(args.modules)
+    version = getattr(args, "version", "3.12")
 
     try:
         from forger_core import CpythonModuleRegistry, CpythonBuildConfig  # type: ignore[import-not-found, import-untyped, missing-import]
@@ -559,37 +520,56 @@ def _cpython_build_config(args: list[str]) -> None:
         minor = int(ver_parts[1]) if len(ver_parts) > 1 else 12
         registry = CpythonModuleRegistry.new((major, minor))
         analysis = registry.analyze_required_sources(modules)
-        build_cfg = CpythonBuildConfig.from_analysis(analysis, target, version)
-        print(build_cfg.format_report())
+
+        if args.cpython_command == "analyze":
+            print(analysis.format_report())
+        elif args.cpython_command == "build-config":
+            target = getattr(args, "target", "windows-x64")
+            build_cfg = CpythonBuildConfig.from_analysis(analysis, target, version)
+            print(build_cfg.format_report())
     except ImportError:
         print("Error: Rust core not available. Install with 'uv sync' and rebuild.")
         sys.exit(1)
 
 
-def print_usage() -> None:
-    """Print CLI usage information."""
-    print(
-        """\
-Usage: forger <COMMAND>
+# ---------------------------------------------------------------------------
+# Entry point — Python CLI that delegates heavy lifting to forger_core (Rust).
+# ---------------------------------------------------------------------------
 
-Forger — Python application compiler and bundler
 
-Commands:
-  compile        Analyze and compile a Python project into a VFS directory
-  forge          Package the VFS directory into a .forge artifact
-  build          Build a platform-specific executable from a .forge artifact
-  info           Show information about a .forge artifact
-  build-config   Build-config subcommands
-    check        Check if required build tools are present on the machine
-  cpython        CPython module analysis and minimal build configuration
-    analyze      Analyze which CPython modules are required
-    build-config Generate a minimal CPython build configuration
+def run() -> None:
+    """Entry point for the forger command.
 
-Options:
-  -h, --help     Print help
-  -V, --version  Print version
-  -v, --verbose  Enable verbose output"""
-    )
+    All argument parsing and dispatch happens in Python via argparse.
+    Heavy-lifting operations (hashing, graph construction, VFS generation)
+    are delegated to the forger_core Rust library via PyO3.
+    """
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    # Setup logging early
+    verbose = getattr(args, "verbose", False)
+    setup_logging(verbose)
+
+    dispatch = {
+        "compile": _on_compile,
+        "forge": _on_forge,
+        "build": _on_build,
+        "info": _on_info,
+        "build-config": _on_build_config,
+        "cpython": _on_cpython,
+    }
+
+    handler = dispatch.get(args.command)
+    if handler is None:
+        parser.print_help()
+        sys.exit(1)
+
+    handler(args)
 
 
 if __name__ == "__main__":
