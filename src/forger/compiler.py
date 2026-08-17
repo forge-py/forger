@@ -690,6 +690,14 @@ class Compiler:
         # Mark reachable nodes as required (tree-shaking)
         self.graph.mark_reachable_required()
 
+        # Mark plugin-retained modules as required so they survive
+        # tree-shaking even when not reachable from the entry point.
+        # This runs before generate_vfs() which calls mark_reachable_required()
+        # again, but the retained_modules set is also processed in generate_vfs()
+        # after that second call, so retained modules are not lost.
+        for retained_mod in plugin_ctx.retain_modules:
+            self._mark_retained_required(retained_mod)
+
         # Run post-shake hooks (dead code detection, optimizer passes)
         runner.run_after_shake(plugin_ctx)
         runner.run_build_end(plugin_ctx)
@@ -731,6 +739,15 @@ class Compiler:
 
         # Mark reachable nodes
         self.graph.mark_reachable_required()
+
+        # Re-apply plugin-retained modules after mark_reachable_required()
+        # which may have overwritten the required flags set in run_plugins().
+        # When a plugin retains a package (e.g., "blog"), also retain all
+        # child modules (e.g., "blog.views", "blog.models").
+        plugin_ctx = getattr(self, "_plugin_context", None)
+        if plugin_ctx:
+            for retained_mod in plugin_ctx.retain_modules:
+                self._mark_retained_required(retained_mod)
 
         # Invoke render_start hook
         runner = getattr(self, "_plugin_runner", None)
@@ -1109,6 +1126,31 @@ class Compiler:
             sources.append(py_file)
 
         return sources
+
+    def _mark_retained_required(self, retained_mod: str) -> None:
+        """Mark a retained module and all its child modules as required.
+
+        When a plugin retains a package (e.g., ``"blog"``), this method marks
+        the package node itself as required as well as every descendant node
+        (e.g., ``"blog.views"``, ``"blog.models"``). This ensures that
+        retaining a top-level package survives tree-shaking for all its
+        sub-modules.
+        """
+        if self.graph is None:
+            return
+
+        # Mark the exact node if it exists
+        node = self.graph.get_node(retained_mod)
+        if node is not None:
+            node.required = True
+
+        # Mark all child modules (e.g., "blog" -> "blog.views", "blog.models")
+        prefix = retained_mod + "."
+        for child_id in self.graph.all_nodes():
+            if child_id.startswith(prefix):
+                child_node = self.graph.get_node(child_id)
+                if child_node is not None:
+                    child_node.required = True
 
     def _path_to_module(self, filepath: Path) -> str | None:
         """Convert a file path to a Python module name."""
