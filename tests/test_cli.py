@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from forger.cli.__main__ import run_compile, run_build, run_forge, run_info
+from forger.cli.__main__ import run_build, run_compile
 
 
 def test_run_compile_simple_project(capsys) -> None:

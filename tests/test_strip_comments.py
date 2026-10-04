@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import pytest
+from forger.core import DependencyNode, NodeType
 from forger.optimizer.strip import (
+    StripCommentsDocstrings,
     _strip_comments,
     _strip_docstrings,
-    strip_comments_and_docstrings,
-    StripCommentsDocstrings,
-    optimize_node_content,
     optimize_graph_nodes,
+    optimize_node_content,
+    strip_comments_and_docstrings,
 )
-from forger.core import DependencyNode, NodeType
-
 
 # ---------------------------------------------------------------------------
 # Docstring stripping tests

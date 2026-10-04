@@ -70,6 +70,37 @@ def _entry_point_from_config(config_path: Path) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _find_forger_config(project_root: Path, explicit: str | None) -> Path | None:
+    """Locate the project's forger.py / forger.config.py."""
+    if explicit:
+        return Path(explicit).resolve()
+    for name in ("forger.py", "forger.config.py"):
+        candidate = project_root / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _resolve_output_dir(
+    project_root: Path, output: str, compiler: object
+) -> Path:
+    """Resolve dist dir, honoring a ``dist_dir`` override from config."""
+    out = Path(output)
+    output_dir = out.resolve() if out.is_absolute() else project_root / out
+    import forger.api as api_module
+
+    ctx = api_module.get_context()
+    cfg = ctx.config
+    if cfg and cfg.dist_dir:
+        cfg_output = project_root / cfg.dist_dir
+        if cfg_output != output_dir:
+            logger.info("Using dist_dir from config: %s", cfg_output)
+            if hasattr(compiler, "output_path"):
+                compiler.output_path = cfg_output
+            return cfg_output
+    return output_dir
+
+
 def run_compile(
     source: str,
     output: str,
@@ -88,17 +119,7 @@ def run_compile(
         print(f"Error: source directory does not exist: {project_root}", file=sys.stderr)
         sys.exit(1)
 
-    # Resolve the forger config path early so we can read the entry point
-    # override before validating the entry file exists.
-    forger_py_path: Path | None = None
-    if forger_py:
-        forger_py_path = Path(forger_py).resolve()
-    else:
-        for forger_cfg_name in ("forger.py", "forger.config.py"):
-            candidate = project_root / forger_cfg_name
-            if candidate.exists():
-                forger_py_path = candidate
-                break
+    forger_py_path = _find_forger_config(project_root, forger_py)
 
     # If a config file exists, try to read the entry point override
     # before we validate the entry file.
@@ -117,19 +138,13 @@ def run_compile(
             print(f"Error: entry point not found: {entry_point}", file=sys.stderr)
             sys.exit(1)
 
-    output_path = Path(output)
-    if not output_path.is_absolute():
-        output_dir = project_root / output_path
-    else:
-        output_dir = output_path.resolve()
-
     try:
         from forger.compiler import Compiler
 
         compiler = Compiler(
             project_root=project_root,
             entry_point=entry_point,
-            output_path=output_dir,
+            output_path=(Path(output).resolve()),
         )
 
         compiler.analyze()
@@ -137,20 +152,10 @@ def run_compile(
         if forger_py_path is not None:
             compiler.process_forger_py(forger_py_path)
 
-        import forger.api as api_module
-
-        ctx = api_module.get_context()
-        cfg = ctx.config
-        if cfg and cfg.dist_dir:
-            cfg_output = project_root / cfg.dist_dir
-            if cfg_output != output_dir:
-                output_dir = cfg_output
-                compiler.output_path = cfg_output
-                logger.info("Using dist_dir from config: %s", cfg_output)
-
-        if output_dir.exists():
-            shutil.rmtree(output_dir)
-            logger.info("Cleaned dist directory: %s", output_dir)
+        output_dir = _resolve_output_dir(project_root, output, compiler)
+        # No rmtree here: generate_vfs() stages into a .tmp sibling and
+        # atomically renames on success (CLAUDE.md invariant 11). Removing
+        # the directory here would defeat the atomicity guarantee.
 
         compiler.run_plugins()
         compiler.generate_vfs()
@@ -166,9 +171,10 @@ def run_compile(
 def run_forge(
     vfs_dir: str,
     output: str,
+    entry_point: str | None = None,
     verbose: bool = False,
 ) -> None:
-    """Package the VFS dist/ directory into a .forge artifact."""
+    """Package the VFS dist/ directory into a .forge directory artifact."""
     setup_logging(verbose)
 
     logger.info("Forger forge: %s -> %s", vfs_dir, output)
@@ -179,7 +185,7 @@ def run_forge(
     try:
         from forger.compiler import Compiler
 
-        compiler = Compiler.forge_from_vfs(vfs_path, artifact_path)
+        compiler = Compiler.forge_from_vfs(vfs_path, artifact_path, entry_point=entry_point or "")
         compiler.generate_artifact()
 
         logger.info("Artifact generated: %s", artifact_path)
@@ -195,12 +201,15 @@ def run_build(
     output: str | None = None,
     verbose: bool = False,
 ) -> None:
-    """Build a platform-specific executable from a .forge artifact."""
+    """Build a platform-specific bundle from a .forge directory artifact."""
     setup_logging(verbose)
 
     artifact_path = Path(artifact).resolve()
-    if not artifact_path.is_file():
-        print(f"Error: artifact does not exist: {artifact_path}", file=sys.stderr)
+    if not artifact_path.is_dir():
+        print(
+            f"Error: artifact is not a .forge directory: {artifact_path}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     logger.info("Forger build: %s -> %s", artifact, target)
@@ -318,6 +327,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output .forge artifact path (default: app.forge)",
     )
     forge_parser.add_argument(
+        "-e", "--entry-point", default=None,
+        help="Entry point module to record in the artifact manifest",
+    )
+    forge_parser.add_argument(
         "-v", "--verbose", action="store_true",
         help="Enable verbose output",
     )
@@ -360,10 +373,61 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Build configuration subcommands",
     )
     build_config_sub = build_config_parser.add_subparsers(dest="build_config_command")
-    check_parser = build_config_sub.add_parser("check", help="Check if required build tools are present")
+    check_parser = build_config_sub.add_parser(
+        "check", help="Check if required build tools are present"
+    )
     check_parser.add_argument(
         "-t", "--target", default="windows-x64",
         help="Target platform (default: windows-x64)",
+    )
+
+    # --- runtime ---
+    runtime_parser = subparsers.add_parser(
+        "runtime",
+        help="Build and inspect stripped CPython runtimes for targets",
+    )
+    runtime_sub = runtime_parser.add_subparsers(dest="runtime_command")
+
+    runtime_build = runtime_sub.add_parser(
+        "build",
+        help="Fetch, configure, compile and strip a CPython runtime",
+    )
+    runtime_build.add_argument(
+        "-t", "--target", default="windows-x64",
+        help="Target platform triple (default: windows-x64)",
+    )
+    runtime_build.add_argument(
+        "--version", default="3.12",
+        help="CPython version (default: 3.12)",
+    )
+    runtime_build.add_argument(
+        "--modules", nargs="*", default=[],
+        help="Required stdlib modules for conservative pruning (default: full Lib)",
+    )
+    runtime_build.add_argument(
+        "--force", action="store_true",
+        help="Rebuild even if a cached runtime exists",
+    )
+    runtime_build.add_argument(
+        "--dry-run", action="store_true",
+        help="Validate toolchain and report without building",
+    )
+    runtime_build.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Enable verbose output",
+    )
+
+    runtime_info = runtime_sub.add_parser(
+        "info",
+        help="Show runtime build status for a target",
+    )
+    runtime_info.add_argument(
+        "-t", "--target", default="windows-x64",
+        help="Target platform triple (default: windows-x64)",
+    )
+    runtime_info.add_argument(
+        "--version", default="3.12",
+        help="CPython version (default: 3.12)",
     )
 
     # --- cpython analyze ---
@@ -426,6 +490,7 @@ def _on_forge(args: argparse.Namespace) -> None:
     run_forge(
         vfs_dir=args.vfs_dir,
         output=args.output,
+        entry_point=args.entry_point,
         verbose=args.verbose,
     )
 
@@ -450,7 +515,9 @@ def _on_build_config(args: argparse.Namespace) -> None:
 
     target = getattr(args, "target", "windows-x64")
     try:
-        from forger_core import check_build_config  # type: ignore[import-not-found, import-untyped, missing-import]
+        from forger_core import (
+            check_build_config,  # type: ignore[import-not-found, import-untyped, missing-import]
+        )
 
         result = check_build_config(target)
         print(result.format_report())
@@ -504,21 +571,81 @@ def _build_config_check_python(target: str) -> None:
         sys.exit(1)
 
 
+def _on_runtime(args: argparse.Namespace) -> None:
+    command = getattr(args, "runtime_command", None)
+    if command not in ("build", "info"):
+        print("Error: unknown runtime subcommand. Use 'build' or 'info'.", file=sys.stderr)
+        sys.exit(1)
+
+    from forger.build.runtime_builder import CpythonRuntimeBuilder, RuntimeSpec
+
+    spec = RuntimeSpec(
+        target_triple=args.target,
+        python_version=args.version,
+        required_modules=list(getattr(args, "modules", []) or []),
+    )
+    builder = CpythonRuntimeBuilder(spec)
+
+    if command == "info":
+        info = builder.info()
+        print(f"Target:      {info['target']}")
+        print(f"Version:     {info['version']}")
+        print(f"Recipe:      {info['recipe']}")
+        print(f"Cross build: {info['cross']}")
+        print(f"Cached:      {info['cached']}")
+        print(f"Runtime dir: {info['runtime_dir']}")
+        problems = info["problems"]
+        if isinstance(problems, list) and problems:
+            print("Problems:")
+            for p in problems:
+                if isinstance(p, str):
+                    print(f"  - {p}")
+            sys.exit(1)
+        return
+
+    try:
+        result = builder.ensure_runtime(
+            force_rebuild=args.force, dry_run=args.dry_run
+        )
+    except RuntimeError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
+
+    if args.dry_run:
+        print(f"Dry run OK: {args.target} / CPython {args.version}")
+        print(f"Runtime would be placed at: {result.runtime_dir}")
+        return
+
+    print(f"Runtime ready: {result.runtime_dir}")
+    if result.stripped_count:
+        print(f"Stripped binaries: {result.stripped_count}")
+    if result.stdlib_module_count:
+        print(f"Stdlib modules: {result.stdlib_module_count}")
+
+
 def _on_cpython(args: argparse.Namespace) -> None:
-    if not hasattr(args, "cpython_command") or args.cpython_command not in ("analyze", "build-config"):
-        print("Error: unknown cpython subcommand. Use 'analyze' or 'build-config'.", file=sys.stderr)
+    valid_commands = ("analyze", "build-config")
+    cmd = getattr(args, "cpython_command", None)
+    if cmd not in valid_commands:
+        print(
+            "Error: unknown cpython subcommand. Use 'analyze' or 'build-config'.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     modules = list(args.modules)
     version = getattr(args, "version", "3.12")
 
     try:
-        from forger_core import CpythonModuleRegistry, CpythonBuildConfig  # type: ignore[import-not-found, import-untyped, missing-import]
+        from forger_core import (  # type: ignore[import-not-found, import-untyped, missing-import]
+            CpythonBuildConfig,
+            CpythonModuleRegistry,
+        )
 
         ver_parts = version.split(".")
         major = int(ver_parts[0]) if len(ver_parts) > 0 else 3
         minor = int(ver_parts[1]) if len(ver_parts) > 1 else 12
-        registry = CpythonModuleRegistry.new((major, minor))
+        registry = CpythonModuleRegistry((major, minor))
         analysis = registry.analyze_required_sources(modules)
 
         if args.cpython_command == "analyze":
@@ -562,6 +689,7 @@ def run() -> None:
         "info": _on_info,
         "build-config": _on_build_config,
         "cpython": _on_cpython,
+        "runtime": _on_runtime,
     }
 
     handler = dispatch.get(args.command)

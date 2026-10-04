@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -220,15 +220,7 @@ class _ScopeCollector(ast.NodeVisitor):
                 return Purity.PURE
             if isinstance(
                 value,
-                (
-                    ast.Constant,
-                    ast.List,
-                    ast.Dict,
-                    ast.Set,
-                    ast.Tuple,
-                    ast.Ellipsis,
-                    ast.NameConstant,
-                ),
+                (ast.Constant, ast.List, ast.Dict, ast.Set, ast.Tuple),
             ):
                 return Purity.PURE
             # Function calls, attribute access, etc. are potentially impure
@@ -479,33 +471,26 @@ class ASTPruner:
         # Import statements are always retained (they have side effects)
         if isinstance(stmt, (ast.Import, ast.ImportFrom)):
             return True
-
         # Function/class definitions
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            symbol_id = f"{module_id}.{stmt.name}"
-            if symbol_id in self.reachable:
-                return True
-            return False
-
+            return f"{module_id}.{stmt.name}" in self.reachable
         # Assignments at module level
-        if isinstance(stmt, ast.Assign):
-            for target in stmt.targets:
-                if isinstance(target, ast.Name):
-                    symbol_id = f"{module_id}.{target.id}"
-                    if symbol_id in self.reachable:
-                        return True
-            # If not reachable, check purity
-            return self._has_side_effects(stmt)
-
-        if isinstance(stmt, ast.AnnAssign):
-            if stmt.target and isinstance(stmt.target, ast.Name):
-                symbol_id = f"{module_id}.{stmt.target.id}"
-                if symbol_id in self.reachable:
-                    return True
-            return self._has_side_effects(stmt)
-
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            return self._retain_assignment(stmt, module_id)
         # Expressions, global/nonlocal declarations, etc. — retain conservatively
         return True
+
+    def _retain_assignment(self, stmt: ast.stmt, module_id: str) -> bool:
+        """Keep an assignment when reachable or potentially side-effectful."""
+        targets: list[ast.expr] = (
+            stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+        )
+        for target in targets:
+            if isinstance(target, ast.Name):
+                if f"{module_id}.{target.id}" in self.reachable:
+                    return True
+        # If not reachable, check purity
+        return self._has_side_effects(stmt)
 
     @staticmethod
     def _has_side_effects(stmt: ast.stmt) -> bool:

@@ -1,0 +1,25 @@
+[package]
+name = "ruff_python_trivia"
+version = "0.0.10"
+description = "This is an internal component crate of Ruff"
+authors = ["Charlie Marsh <charlie.r.marsh@gmail.com>"]
+edition = "2024"
+rust-version = "1.95"
+homepage = "https://docs.astral.sh/ruff"
+documentation = "https://docs.astral.sh/ruff"
+repository = "https://github.com/astral-sh/ruff"
+license = "MIT"
+
+[package.metadata.forger]
+vendored-from = "https://github.com/astral-sh/ruff"
+vendored-ref = "11c76bf48fdac06b2f240cba502eda96da4dce77" # tag: 0.16.4
+
+[lib]
+
+[dependencies]
+ruff_source_file = { version = "0.0.10", path = "../ruff_source_file" }
+ruff_text_size = { version = "0.0.10", path = "../ruff_text_size" }
+
+itertools = "0.15.0"
+rustc-hash = "2.0.0"
+unicode-ident = "1.0.12"

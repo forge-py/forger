@@ -16,13 +16,23 @@ logger = logging.getLogger(__name__)
 # Try to import the compiled Rust extension
 # If not available, fall back to pure Python implementations
 try:
+    from forger.forger_core import (
+        DependencyEdge as _RustDependencyEdge,
+    )
+    from forger.forger_core import (
+        DependencyGraph as _RustDependencyGraph,
+    )
+    from forger.forger_core import (
+        DependencyNode as _RustDependencyNode,
+    )
     from forger.forger_core import (  # type: ignore[import-not-found, import-untyped, missing-import]
         EdgeProvenance as _RustEdgeProvenance,
-        DependencyEdge as _RustDependencyEdge,
-        DependencyNode as _RustDependencyNode,
-        NodeType as _RustNodeType,
+    )
+    from forger.forger_core import (
         EdgeType as _RustEdgeType,
-        DependencyGraph as _RustDependencyGraph,
+    )
+    from forger.forger_core import (
+        NodeType as _RustNodeType,
     )
 
     HAS_RUST_CORE = True
@@ -209,7 +219,7 @@ if HAS_RUST_CORE:
                     setattr(self._rs, k, v)
 
         @classmethod
-        def new(cls, node_id: str, node_type) -> "DependencyNode":
+        def new(cls, node_id: str, node_type) -> DependencyNode:
             if isinstance(node_type, str):
                 type_map = {
                     "python_module": _RustNodeType.PythonModule,
@@ -237,13 +247,13 @@ if HAS_RUST_CORE:
             else:
                 setattr(self._rs, name, value)
 
-        def with_metadata(self, key: str, value: str) -> "DependencyNode":
+        def with_metadata(self, key: str, value: str) -> DependencyNode:
             meta = getattr(self._rs, "metadata", {})
             meta[key] = value
             self._rs.metadata = meta
             return self
 
-        def mark_unoptimized(self) -> "DependencyNode":
+        def mark_unoptimized(self) -> DependencyNode:
             self._rs.unoptimized = True
             return self
 
@@ -252,6 +262,38 @@ if HAS_RUST_CORE:
 
         def get_content(self) -> str | None:
             return self._rs.content
+
+        @property
+        def node_type(self) -> str:
+            """Short string form (e.g. "python_module").
+
+            The Rust binding exposes NodeType as a pyclass enum, whose
+            default Python repr is the class name. Normalize to the same
+            string the pure-Python fallback stores so string comparisons
+            against ``NodeType.PythonModule`` keep working.
+            """
+            raw = str(getattr(self._rs, "node_type", ""))
+            return raw.split("::")[-1] if raw else ""
+
+        @node_type.setter
+        def node_type(self, value: str) -> None:
+            # Accept either a NodeType enum, the short string, or "NodeType::x".
+            short = value.split("::")[-1] if "::" in str(value) else str(value)
+            type_map = {
+                "python_module": _RustNodeType.PythonModule,
+                "python_package": _RustNodeType.PythonPackage,
+                "stdlib_module": _RustNodeType.StdlibModule,
+                "stdlib_package": _RustNodeType.StdlibPackage,
+                "native_extension": _RustNodeType.NativeExtension,
+                "native_library": _RustNodeType.NativeLibrary,
+                "resource": _RustNodeType.Resource,
+                "configuration": _RustNodeType.Configuration,
+                "entry_point": _RustNodeType.EntryPoint,
+                "vfs_path": _RustNodeType.VfsPath,
+                "dynamic_import": _RustNodeType.DynamicImport,
+                "external_package": _RustNodeType.ExternalPackage,
+            }
+            self._rs.node_type = type_map.get(short, _RustNodeType.PythonModule)
 
     class DependencyEdge:  # type: ignore[no-redef]
         """Thin wrapper around Rust DependencyEdge."""
@@ -312,8 +354,13 @@ if HAS_RUST_CORE:
             to_node: str,
             edge_type,
             provenance=None,
-        ) -> "DependencyEdge":
-            return cls(from_node=from_node, to_node=to_node, edge_type=edge_type, provenance=provenance)
+        ) -> DependencyEdge:
+            return cls(
+                from_node=from_node,
+                to_node=to_node,
+                edge_type=edge_type,
+                provenance=provenance,
+            )
 
         def __getattr__(self, name):
             rust_name = {"from_node": "from", "to_node": "to"}.get(name, name)
@@ -414,6 +461,14 @@ if HAS_RUST_CORE:
 
         def find_reachable(self) -> set[str]:
             return set(self._rs.find_reachable())
+
+        def set_node_content(self, node_id: str, content: str) -> bool:
+            """Write content through to the stored node (by id)."""
+            return self._rs.set_node_content(node_id, content)
+
+        def set_node_required(self, node_id: str, required: bool) -> bool:
+            """Set the required flag on the stored node (by id)."""
+            return self._rs.set_node_required(node_id, required)
 
         def all_nodes(self) -> dict[str, DependencyNode]:
             reachable_ids = self._rs.find_reachable()
@@ -619,6 +674,19 @@ if not HAS_RUST_CORE:
         def dependencies_of(self, node_id: str) -> list[str]:
             return [e.to_node for e in self._edges_from.get(node_id, [])]
 
+        def edges_between(self, src: str, dst: str) -> list[DependencyEdge]:
+            """Return every edge from ``src`` to ``dst``, in insertion order.
+
+            Returns an empty list if no such edge exists. Public API
+            so diagnostic code (and the compiler's edge lookups) can
+            avoid reaching into the private ``_edges_from`` dict.
+            """
+            return [
+                edge
+                for edge in self._edges_from.get(src, [])
+                if edge.to_node == dst
+            ]
+
         def dependents_of(self, node_id: str) -> list[str]:
             return [e.from_node for e in self._edges_to.get(node_id, [])]
 
@@ -640,6 +708,22 @@ if not HAS_RUST_CORE:
                         queue.append(dep)
 
             return visited
+
+        def set_node_content(self, node_id: str, content: str) -> bool:
+            """Write content through to the stored node (by id)."""
+            node = self._nodes.get(node_id)
+            if node is None:
+                return False
+            node.set_content(content)
+            return True
+
+        def set_node_required(self, node_id: str, required: bool) -> bool:
+            """Set the required flag on the stored node (by id)."""
+            node = self._nodes.get(node_id)
+            if node is None:
+                return False
+            node.required = required
+            return True
 
         def mark_reachable_required(self) -> None:
             reachable = self.find_reachable()

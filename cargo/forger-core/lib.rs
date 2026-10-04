@@ -32,6 +32,7 @@ pub use buildconfig::{check_build_config, BuildConfigResult, ToolCheck};
 pub use cache::Cache;
 pub use cpython::{
     CpythonAnalysisResult, CpythonBuildConfig, CpythonModuleRegistry, CpythonSourceAnalyzer,
+    StdlibModuleInfo,
 };
 pub use depgraph::{
     DependencyEdge, DependencyGraph, DependencyNode, EdgeProvenance, EdgeType, NodeType,
@@ -69,6 +70,7 @@ fn forger_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<BuildConfigResult>()?;
     m.add_class::<CpythonModuleRegistry>()?;
     m.add_class::<CpythonAnalysisResult>()?;
+    m.add_class::<StdlibModuleInfo>()?;
     m.add_class::<CpythonBuildConfig>()?;
 
     // Dependency graph types

@@ -1,0 +1,34 @@
+[package]
+name = "ruff_text_size"
+version = "0.0.10"
+description = "This is an internal component crate of Ruff"
+authors = ["Charlie Marsh <charlie.r.marsh@gmail.com>"]
+edition = "2024"
+rust-version = "1.95"
+homepage = "https://docs.astral.sh/ruff"
+documentation = "https://docs.astral.sh/ruff"
+repository = "https://github.com/astral-sh/ruff"
+license = "MIT"
+
+[package.metadata.forger]
+vendored-from = "https://github.com/astral-sh/ruff"
+vendored-ref = "11c76bf48fdac06b2f240cba502eda96da4dce77" # tag: 0.16.4
+
+[dependencies]
+get-size2 = { version = "0.10.3", features = [
+    "derive",
+    "smallvec",
+    "hashbrown",
+    "compact-str",
+    "ordermap",
+    "thin-vec",
+], optional = true }
+schemars = { version = "1.0.4", optional = true }
+serde = { version = "1.0.197", features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde"]
+get-size = ["dep:get-size2"]
+
+[lib]
+test = false

@@ -1,0 +1,42 @@
+[package]
+name = "ruff_python_parser"
+version = "0.0.10"
+description = "This is an internal component crate of Ruff"
+authors = ["Charlie Marsh <charlie.r.marsh@gmail.com>", "RustPython Team"]
+edition = "2024"
+rust-version = "1.95"
+homepage = "https://docs.astral.sh/ruff"
+documentation = "https://docs.astral.sh/ruff"
+repository = "https://github.com/astral-sh/ruff"
+license = "MIT"
+
+[package.metadata.forger]
+vendored-from = "https://github.com/astral-sh/ruff"
+vendored-ref = "11c76bf48fdac06b2f240cba502eda96da4dce77" # tag: 0.16.4
+
+[lib]
+
+[dependencies]
+ruff_python_ast = { version = "0.0.10", path = "../ruff_python_ast", features = ["get-size"] }
+ruff_python_trivia = { version = "0.0.10", path = "../ruff_python_trivia" }
+ruff_text_size = { version = "0.0.10", path = "../ruff_text_size", features = ["get-size"] }
+
+bitflags = "2.5.0"
+bstr = "1.9.1"
+drop_bomb = "0.1.5"
+get-size2 = { version = "0.10.3", features = [
+    "derive",
+    "smallvec",
+    "hashbrown",
+    "compact-str",
+    "ordermap",
+    "thin-vec",
+] }
+memchr = "2.7.1"
+rustc-hash = "2.0.0"
+static_assertions = "1.1.0"
+stacker = "0.1.24"
+thin-vec = "0.2.14"
+unicode-ident = "1.0.12"
+unicode-normalization = "0.1.23"
+unicode_names2 = "1.2.2"

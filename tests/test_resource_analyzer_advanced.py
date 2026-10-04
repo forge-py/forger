@@ -161,3 +161,26 @@ with open("test.txt") as f: pass  # line 4
     analyzer = ResourceAnalyzer()
     accesses = analyzer.analyze_source(source)
     assert any(a.line >= 1 for a in accesses)
+
+
+def test_parents_subscript_resolves() -> None:
+    """``Path(__file__).parents[N] / "x"`` is treated as a file-dir root."""
+    source = (
+        "from pathlib import Path\n"
+        "p = Path(__file__).parents[2] / 'data' / 'shared.csv'\n"
+        "p.read_text()\n"
+    )
+    accesses = ResourceAnalyzer().analyze_source(source)
+    assert accesses, "expected resource access to be discovered"
+    assert accesses[0].segments == ["data", "shared.csv"]
+    assert accesses[0].is_dynamic is False
+
+
+def test_bare_open_string_under_with() -> None:
+    """`with open("name") as f:` is detected even without an explicit receiver."""
+    source = 'with open("a/b.txt") as f: f.read()\n'
+    accesses = ResourceAnalyzer().analyze_source(source)
+    assert accesses
+    # `a/b.txt` is not anchored to a file dir, so segments stay None;
+    # the path expression is still recorded for diagnostics.
+    assert accesses[0].path_expr == "a/b.txt"

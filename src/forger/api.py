@@ -47,6 +47,7 @@ class ForgerConfigDict(TypedDict, total=False):
     targets: list[str]
     metadata: dict[str, str | int]
     dist_dir: str
+    minify_names: bool | dict[str, Any]
 
 
 @dataclass
@@ -72,6 +73,11 @@ class ForgerConfig:
     targets: list[str] = field(default_factory=list)
     metadata: dict[str, str] = field(default_factory=dict)
     dist_dir: str = "dist"
+    # Name minification toggle (MINIFIER.md §1). Off by default; the
+    # compiler must NEVER enable it implicitly. Either a bool (True
+    # means "minify with defaults") or a dict (e.g.
+    # ``{"enabled": True, "keep": {"myapp.api.create_user"}}``).
+    minify_names: bool | dict[str, Any] = False
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +215,7 @@ def defineConfig(  # noqa: N802
             targets=config.get("targets", []),
             metadata={k: str(v) for k, v in config.get("metadata", {}).items()},
             dist_dir=config.get("dist_dir", "dist"),
+            minify_names=config.get("minify_names", False),
         )
 
     _get_context().set_config(cfg)

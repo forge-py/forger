@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+    "forger-core",
+    "vendor/ruff_python_ast",
+    "vendor/ruff_python_parser",
+    "vendor/ruff_python_trivia",
+    "vendor/ruff_source_file",
+    "vendor/ruff_text_size",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+
+[workspace.dependencies]
+# Internal crates
+forger-core = { path = "forger-core" }
+ruff_python_ast = { version = "0.0.10", path = "vendor/ruff_python_ast" }
+ruff_python_parser = { version = "0.0.10", path = "vendor/ruff_python_parser" }
+ruff_python_trivia = { version = "0.0.10", path = "vendor/ruff_python_trivia" }
+ruff_source_file = { version = "0.0.10", path = "vendor/ruff_source_file" }
+ruff_text_size = { version = "0.0.10", path = "vendor/ruff_text_size" }
+
+# Shared third-party versions (keep in sync across crates)
+bitflags = "2.5.0"
+memchr = "2.7.1"
+thiserror = "2.0.0"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

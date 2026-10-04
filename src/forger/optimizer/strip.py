@@ -8,20 +8,20 @@ post-pass after framework plugins have completed their analysis.
 from __future__ import annotations
 
 import ast
+import io
 import logging
 import tokenize
-import io
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
     from forger.core import DependencyNode
     from forger.optimizer import BasePlugin, PluginContext
 
+from forger.optimizer import BasePlugin  # noqa: E402 - avoids circular import at module scope
+
 logger = logging.getLogger(__name__)
-
-from forger.optimizer import BasePlugin
-
 
 # ---------------------------------------------------------------------------
 # AST-based docstring removal
@@ -210,29 +210,18 @@ class StripCommentsDocstrings(BasePlugin):
         *,
         context: PluginContext,
     ) -> None:
-        """Transform a single module's AST to remove docstrings.
+        """Remove docstrings from the shared module AST in-place.
 
-        This hook is called by PluginRunner for each Python node.
+        Called by the compiler's AST phase with the tree parsed during
+        analyze() — no re-parsing. Mutating the tree here is enough; the
+        compiler unparses transformed trees back into node content.
+        Comments are tokenizer-based and handled in ``after_shake`` on
+        the emitted text.
         """
-        node = context.graph.get_node(module_id)
-        if node is None:
+        if not self.strip_docstrings:
             return
-
-        source = node.get_content()
-        if source is None:
-            return
-
-        original_len = len(source)
-
-        if self.strip_docstrings:
-            source = _strip_docstrings(source)
-
-        if self.strip_comments:
-            source = _strip_comments(source)
-
-        node.set_content(source)
+        _remove_body_docstrings(tree)
         self._stripped_count += 1
-        self._bytes_saved += original_len - len(source)
 
     def after_shake(self, *, context: PluginContext) -> None:
         """Apply stripping pass to all required Python nodes.

@@ -25,10 +25,11 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
     from forger.core import (  # type: ignore[attr-defined]
+        DependencyEdge,
         DependencyGraph,
         DependencyNode,
-        DependencyEdge,
     )
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,12 @@ class PluginContext:
     _dynamic_symbols: set[str] = field(default_factory=set)
     _unoptimized_dependencies: set[str] = field(default_factory=set)
     _source_files: list[Path] = field(default_factory=list)
+    # module_id -> parsed ast.Module, shared from the compiler's parse phase.
+    _module_asts: dict[str, Any] = field(default_factory=dict)
+    # module_id -> source text registered by plugins via virtual_module().
+    _virtual_modules: dict[str, str] = field(default_factory=dict)
+    # resource path -> text/bytes registered by plugins via virtual_resource().
+    _virtual_resources: dict[str, str | bytes] = field(default_factory=dict)
     _current_plugin_name: str | None = None
 
     @property
@@ -217,6 +224,33 @@ class PluginContext:
 
     # -- Module info API --
 
+    def set_module_ast(self, module_id: str, tree: Any) -> None:
+        """Store the parsed AST for a module (compiler parse phase does this)."""
+        self._module_asts[module_id] = tree
+
+    def get_module_ast(self, module_id: str) -> Any | None:
+        """Return the cached AST for a module, or None.
+
+        Trees come from the compiler's parse phase and may have been
+        mutated by earlier ``transform_ast`` hooks.
+        """
+        return self._module_asts.get(module_id)
+
+    @property
+    def module_asts(self) -> dict[str, Any]:
+        """Live reference to the cached module ASTs.
+
+        Mutating this dict in place (e.g. ``ctx.module_asts[id] = tree``)
+        is the supported way to update cached trees. The earlier
+        property returned a fresh copy per access, which silently dropped
+        updates from compiler-internal passes like symbol shaking.
+        """
+        return self._module_asts
+
+    def module_asts_snapshot(self) -> dict[str, Any]:
+        """Read-only snapshot of the AST cache."""
+        return dict(self._module_asts)
+
     def _get_module_info_store(self) -> dict[str, dict[str, Any]]:
         """Lazy-initialize the module info storage."""
         if not hasattr(self, "_module_info"):
@@ -224,36 +258,49 @@ class PluginContext:
         return self._module_info
 
     def get_module_info(self, module_id: str) -> dict[str, Any] | None:
-        """Get cached metadata for a module.
+        """Get live metadata for a module.
 
-        This mirrors the Rolldown ``this.getModuleInfo()`` API.
-        Returns a dict with module metadata or None if not found.
+        This mirrors the Rolldown ``this.getModuleInfo()`` API. Returns
+        a fresh dict on every call so plugins see post-transform
+        state — caching the result would silently make later hooks
+        observe pre-transform code/AST.
+
+        The returned dict is the *base* view (id, code, ast,
+        is_entry_point, is_external, meta) merged with any
+        plugin-attached metadata stored via ``set_module_info``. The
+        merge is one-way: the persisted store isn't mutated by a
+        caller's read.
 
         Args:
             module_id: The module identifier to look up.
 
         Returns:
-            Dict with keys: ``id``, ``code``, ``ast``, ``is_entry_point``,
-            ``is_external``, or None if the module has no cached info.
+            Dict with keys ``id``, ``code``, ``ast``, ``is_entry_point``,
+            ``is_external``, ``meta``, or None if the module has no
+            graph node.
         """
-        store = self._get_module_info_store()
-        if module_id in store:
-            return store[module_id]
-
-        # Auto-populate from graph node if available
         node = self.graph.get_node(module_id)
         if node is None:
             return None
 
-        info = {
+        base = {
             "id": module_id,
             "code": node.get_content(),
-            "is_entry_point": node.entry_point,
-            "is_external": node.external,
+            "ast": self._module_asts.get(module_id),
             "meta": dict(node.metadata),
+            # Rust-backed nodes don't carry entry_point/external
+            # attributes; read defensively so the pipeline never crashes.
+            "is_entry_point": getattr(node, "entry_point", None),
+            "is_external": getattr(node, "external", None),
         }
-        store[module_id] = info
-        return info
+        # Layer plugin-attached metadata on top. Keys already in ``base``
+        # (id, code, ast, meta, is_entry_point, is_external) cannot be
+        # overwritten — only new keys are added.
+        store = self._get_module_info_store()
+        if module_id in store:
+            for k, v in store[module_id].items():
+                base.setdefault(k, v)
+        return base
 
     def set_module_info(self, module_id: str, info: dict[str, Any]) -> None:
         """Set or update metadata for a module.
@@ -267,11 +314,11 @@ class PluginContext:
         """
         store = self._get_module_info_store()
         if module_id not in store:
-            # Initialize from graph node if possible
-            existing = self.get_module_info(module_id)
-            if existing is None:
-                existing = {"id": module_id}
-                store[module_id] = existing
+            # Always create the store entry first, so subsequent
+            # ``store[module_id].update(info)`` works regardless of
+            # whether the graph node exists.
+            existing = self.get_module_info(module_id) or {"id": module_id}
+            store[module_id] = dict(existing)
 
         store[module_id].update(info)
 
@@ -441,7 +488,7 @@ class PluginContext:
             node_type: Optional node type (defaults to Resource for paths,
                        PythonModule for dotted identifiers).
         """
-        from forger.core import DependencyEdge, DependencyNode, EdgeType, NodeType  # noqa: F401
+        from forger.core import NodeType  # noqa: F401
 
         self._unoptimized_dependencies.add(node_id)
 
@@ -451,17 +498,28 @@ class PluginContext:
             existing.unoptimized = True
             return
 
-        # Infer node type from the id format
+        self.add_node(
+            DependencyNode.new(node_id, self._infer_unoptimized_type(node_id, node_type))
+            .mark_unoptimized()
+        )
+
+    @staticmethod
+    def _infer_unoptimized_type(node_id: str, node_type: str | None) -> str:
+        """Resource for path-like ids, else PythonModule."""
+        from forger.core import NodeType
+
         if node_type is not None:
-            inferred_type = node_type
-        elif "/" in node_id or "\\" in node_id or node_id.endswith((".html", ".css", ".js", ".json", ".png", ".jpg", ".svg")):
-            inferred_type = NodeType.Resource
-        else:
-            inferred_type = NodeType.PythonModule
+            return node_type
+        path_like = "/" in node_id or "\\" in node_id or node_id.endswith(
+            (".html", ".css", ".js", ".json", ".png", ".jpg", ".svg")
+        )
+        if path_like:
+            return NodeType.Resource
+        return NodeType.PythonModule
 
-        self.add_node(DependencyNode.new(node_id, inferred_type).mark_unoptimized())
-
-    def add_unoptimized_resource(self, resource_path: str, source_module: str | None = None) -> None:
+    def add_unoptimized_resource(
+        self, resource_path: str, source_module: str | None = None
+    ) -> None:
         """Add a resource file as unoptimized dependency.
 
         Shorthand for ``add_unoptimized_dependency`` with Resource type.
@@ -473,14 +531,18 @@ class PluginContext:
 
         existing = self.graph.get_node(resource_path)
         if existing is None:
-            self.add_node(DependencyNode.new(resource_path, NodeType.Resource)
-                          .mark_unoptimized()
-                          .with_metadata("source", "plugin"))
+            self.add_node(
+                DependencyNode.new(resource_path, NodeType.Resource)
+                .mark_unoptimized()
+                .with_metadata("source", "plugin")
+            )
         else:
             existing.unoptimized = True
 
         if source_module:
-            edge = DependencyEdge.new(source_module, resource_path, EdgeType.UnoptimizedDependency)
+            edge = DependencyEdge.new(
+                source_module, resource_path, EdgeType.UnoptimizedDependency
+            )
             self.add_edge(edge)
 
     # -- Package detection --
@@ -515,12 +577,74 @@ class PluginContext:
     def unoptimized_dependencies(self) -> set[str]:
         return set(self._unoptimized_dependencies)
 
+    # -- Virtual module / resource registration (PLUGIN_ARCHITECTURE §14-15) --
+
+    def virtual_module(self, name: str, source: str) -> str:
+        """Register a virtual Python module (PLUGIN_ARCHITECTURE.md §14).
+
+        Returns the synthesized module id (``"virtual:<name>"``). The
+        module is added to the graph as a PythonModule node and its
+        source is cached for the parser to pick up. ``load``-style
+        plugins can later provide a different source if needed.
+        """
+        from forger.core import DependencyNode, NodeType  # type: ignore[attr-defined]
+
+        module_id = f"virtual:{name}"
+        if self._graph is not None and not self._graph.get_node(module_id):
+            self._graph.add_node(
+                DependencyNode.new(module_id, NodeType.PythonModule).with_metadata(
+                    "discovered_by", "virtual_module"
+                )
+            )
+        self._virtual_modules[module_id] = source
+        return module_id
+
+    def virtual_resource(self, name: str, content: str | bytes) -> str:
+        """Register a virtual resource (PHILOSOPHY.md §17).
+
+        ``name`` is the project-relative path; ``content`` is the file
+        body as text or bytes. Returns the resource id (the path).
+        """
+        from forger.core import DependencyNode, NodeType  # type: ignore[attr-defined]
+
+        if self._graph is not None and not self._graph.get_node(name):
+            self._graph.add_node(
+                DependencyNode.new(name, NodeType.Resource).with_metadata(
+                    "discovered_by", "virtual_resource"
+                )
+            )
+        self._virtual_resources[name] = content
+        return name
+
+    def virtual_source(self, module_id: str) -> str | None:
+        """Return the source for a virtual module id, or None."""
+        return self._virtual_modules.get(module_id)
+
+    def virtual_content(self, name: str) -> str | bytes | None:
+        """Return the content for a virtual resource path, or None."""
+        return self._virtual_resources.get(name)
+
+    def virtual_module_ids(self) -> set[str]:
+        return set(self._virtual_modules)
+
+    def virtual_resource_paths(self) -> set[str]:
+        return set(self._virtual_resources)
+
+    def virtual_source_for_all(self):
+        """Yield ``(module_id, source)`` for every registered virtual module.
+
+        Order is deterministic (insertion order) so the parser sees
+        a stable sequence. Used by the compiler's parse phase to fold
+        virtual sources into the same AST cache as filesystem sources.
+        """
+        yield from self._virtual_modules.items()
+
 
 # ---------------------------------------------------------------------------
 # BasePlugin — ABC
 # ---------------------------------------------------------------------------
 
-class BasePlugin(abc.ABC):
+class BasePlugin(abc.ABC):  # noqa: B024 - abstract-by-design: every hook defaults to a no-op
     """Abstract base class for all Forger plugins.
 
     Plugins are objects with a ``name`` and optional lifecycle hooks.
@@ -599,15 +723,16 @@ class BasePlugin(abc.ABC):
 
     # ------------------------------------------------------------------
     # Lifecycle hooks (all optional, default to no-op)
+    # noqa: B027 on this block - optional hooks are no-ops by design
     # ------------------------------------------------------------------
 
-    def config(self, *, context: PluginContext) -> None:
+    def config(self, *, context: PluginContext) -> None:  # noqa: B027
         """Modify compiler config before resolution."""
 
-    def config_resolved(self, *, context: PluginContext) -> None:
+    def config_resolved(self, *, context: PluginContext) -> None:  # noqa: B027
         """Read and store the final resolved config."""
 
-    def build_start(self, *, context: PluginContext) -> None:
+    def build_start(self, *, context: PluginContext) -> None:  # noqa: B027
         """Called at the start of each build."""
 
     def resolve_id(
@@ -635,9 +760,7 @@ class BasePlugin(abc.ABC):
         """
         return code
 
-    def module_parsed(
-        self, module_id: str, *, context: PluginContext
-    ) -> None:
+    def module_parsed(self, module_id: str, *, context: PluginContext) -> None:  # noqa: B027
         """Called when AST parsing completes for a module.
 
         This hook is invoked after the compiler has successfully parsed
@@ -649,12 +772,55 @@ class BasePlugin(abc.ABC):
             context: The plugin context.
         """
 
-    def build_end(self, *, context: PluginContext) -> None:
+    def discover_resources(
+        self, module_id: str, *, context: PluginContext
+    ) -> str | None:  # noqa: B027
+        """Resolve a resource node id to a real file path on disk.
+
+        Resource nodes (templates, static files, locale data) often have
+        ids that aren't literal paths — e.g. Django uses
+        ``blog/post_list.html`` while the file lives at
+        ``blog/templates/blog/post_list.html``. This hook lets plugins
+        teach the compiler where to look. The first non-None return
+        wins; returning None means "I don't know, ask another plugin
+        or fall through to the default resolver".
+
+        Strict hook: a raised exception aborts the build
+        (PLUGIN_ARCHITECTURE.md §20).
+        """
+        return None
+
+    def analyze(
+        self, module_id: str, *, context: PluginContext
+    ) -> dict[str, Any] | None:  # noqa: B027
+        """Run a per-module analysis and return findings as a dict.
+
+        Return a dict (anything you want — symbols, resource hints,
+        warnings) or None. The first non-None return wins; downstream
+        callers read it via ``PluginContext.set_module_info`` (set
+        the keys you want plugins to consume) or directly via the
+        hook chain.
+
+        Strict hook: a raised exception aborts the build.
+        """
+        return None
+
+    def transform_resource(
+        self, module_id: str, content: str, *, context: PluginContext
+    ) -> str:  # noqa: B027
+        """Transform a resource's content (e.g. minify a JSON config).
+
+        Return the transformed string. The default is identity
+        (return the input unchanged).
+        """
+        return content
+
+    def build_end(self, *, context: PluginContext) -> None:  # noqa: B027
         """Called at the end of each build (cleanup)."""
 
     # -- Output generation hooks --
 
-    def render_start(self, *, context: PluginContext) -> None:
+    def render_start(self, *, context: PluginContext) -> None:  # noqa: B027
         """First hook of the output generation phase.
 
         Called before any chunks are rendered. Use this to initialize
@@ -678,9 +844,8 @@ class BasePlugin(abc.ABC):
         """
         return None
 
-    def generate_bundle(
-        self, options: dict[str, Any], bundle: dict[str, dict[str, Any]],
-        *, context: PluginContext
+    def generate_bundle(  # noqa: B027
+        self, options: dict[str, Any], bundle: dict[str, dict[str, Any]], *, context: PluginContext
     ) -> None:
         """Modify the final output bundle before writing.
 
@@ -690,10 +855,10 @@ class BasePlugin(abc.ABC):
             context: The plugin context.
         """
 
-    def write_bundle(self, dist_path: Path, *, context: PluginContext) -> None:
+    def write_bundle(self, dist_path: Path, *, context: PluginContext) -> None:  # noqa: B027
         """Called after the output bundle is written."""
 
-    def close_bundle(self, *, context: PluginContext) -> None:
+    def close_bundle(self, *, context: PluginContext) -> None:  # noqa: B027
         """Final cleanup hook after all output is written.
 
         Called once when the compiler is shutting down, after all
@@ -820,7 +985,16 @@ class PluginRunner:
         context: PluginContext | None = None,
         *args,
     ) -> None:
-        """Invoke a hook on all plugins that implement it."""
+        """Invoke a hook on all plugins that implement it.
+
+        ``resolve_id`` and ``load`` are *strict* — their failure aborts
+        the build via :class:`forger.errors.PluginError` because silent
+        fallback would silently corrupt the dependency graph. Other
+        hooks log and continue (the historical contract): a transform
+        that raises shouldn't tank the whole compilation.
+        """
+        from forger.errors import STRICT_HOOKS, PluginError
+
         for plugin in self.plugins:
             if not self._should_apply(plugin):
                 continue
@@ -836,6 +1010,15 @@ class PluginRunner:
                     "Plugin %s: %s hook completed", plugin.name, hook
                 )
             except Exception as e:
+                module_id = args[0] if args else None
+                if hook in STRICT_HOOKS:
+                    raise PluginError(
+                        str(e),
+                        plugin_name=plugin.name,
+                        hook=hook,
+                        module_id=module_id if isinstance(module_id, str) else None,
+                        cause=e,
+                    ) from e
                 logger.error(
                     "Plugin %s: %s hook failed: %s",
                     plugin.name,
@@ -855,13 +1038,21 @@ class PluginRunner:
     def run_resolve_id(
         self, specifier: str, importer: str | None, context: PluginContext
     ) -> str | None:
+        """Run ``resolve_id`` on every plugin and return the first match.
+
+        A plugin failure aborts the build via :class:`PluginError`
+        (resolve_id is a strict hook). Returning None means no plugin
+        claimed the specifier and the analyzer falls back to its
+        string-based resolution.
+        """
+        from forger.errors import PluginError
+
         for plugin in self.plugins:
             if not self._should_apply(plugin):
                 continue
             method = getattr(plugin, "resolve_id", None)
             if method is None:
                 continue
-            # Respect resolve_id_filter
             if plugin.resolve_id_filter and not _matches_filter(
                 plugin.resolve_id_filter, specifier
             ):
@@ -871,21 +1062,30 @@ class PluginRunner:
                 if result is not None:
                     return result
             except Exception as e:
-                logger.error(
-                    "Plugin %s: resolve_id failed: %s",
-                    plugin.name,
-                    e,
-                )
+                raise PluginError(
+                    str(e),
+                    plugin_name=plugin.name,
+                    hook="resolve_id",
+                    module_id=specifier,
+                    source_file=importer,
+                    cause=e,
+                ) from e
         return None
 
     def run_load(self, module_id: str, context: PluginContext) -> str | None:
+        """Run the ``load`` hook on every plugin and return the first match.
+
+        ``load`` is strict: a plugin claiming to provide source for a
+        module must succeed or the build aborts.
+        """
+        from forger.errors import PluginError
+
         for plugin in self.plugins:
             if not self._should_apply(plugin):
                 continue
             method = getattr(plugin, "load", None)
             if method is None:
                 continue
-            # Respect load_filter
             if plugin.load_filter and not _matches_filter(
                 plugin.load_filter, module_id
             ):
@@ -895,11 +1095,13 @@ class PluginRunner:
                 if result is not None:
                     return result
             except Exception as e:
-                logger.error(
-                    "Plugin %s: load failed: %s",
-                    plugin.name,
-                    e,
-                )
+                raise PluginError(
+                    str(e),
+                    plugin_name=plugin.name,
+                    hook="load",
+                    module_id=module_id,
+                    cause=e,
+                ) from e
         return None
 
     def run_transform(
@@ -1016,15 +1218,94 @@ class PluginRunner:
         """Alias for backward compat."""
         self._invoke("transform_ast", context, module_id, tree)
 
-    def run_analyze(self, module_id: str, context: PluginContext) -> None:
-        """Alias for backward compat."""
-        self._invoke("analyze", context, module_id)
+    def run_analyze(
+        self, module_id: str, context: PluginContext
+    ) -> dict[str, Any] | None:
+        """Run the ``analyze`` hook on every plugin.
+
+        Returns the first non-None dict, or None if no plugin
+        produced one. Strict hook (PLUGIN_ARCHITECTURE.md §20).
+        """
+        from forger.errors import PluginError
+
+        for plugin in self.plugins:
+            if not self._should_apply(plugin):
+                continue
+            method = getattr(plugin, "analyze", None)
+            if method is None:
+                continue
+            try:
+                result = method(module_id, context=context)
+            except Exception as e:
+                raise PluginError(
+                    str(e),
+                    plugin_name=plugin.name,
+                    hook="analyze",
+                    module_id=module_id,
+                    cause=e,
+                ) from e
+            if result is not None:
+                return result
+        return None
+
+    def run_transform_resource(
+        self, module_id: str, content: str, context: PluginContext
+    ) -> str:
+        """Run the ``transform_resource`` hook chain.
+
+        Each plugin can return a transformed string; the chain is
+        composed in plugin order. Strict hook.
+        """
+        from forger.errors import PluginError
+
+        for plugin in self.plugins:
+            if not self._should_apply(plugin):
+                continue
+            method = getattr(plugin, "transform_resource", None)
+            if method is None:
+                continue
+            try:
+                content = method(module_id, content, context=context)
+            except Exception as e:
+                raise PluginError(
+                    str(e),
+                    plugin_name=plugin.name,
+                    hook="transform_resource",
+                    module_id=module_id,
+                    cause=e,
+                ) from e
+        return content
 
     def run_discover_resources(
         self, module_id: str, context: PluginContext
-    ) -> None:
-        """Alias for backward compat."""
-        self._invoke("discover_resources", context, module_id)
+    ) -> str | None:
+        """Run the ``discover_resources`` hook on all plugins.
+
+        Returns the first non-None resolved file path, or None if no
+        plugin claimed the resource. Strict hook: a raised exception
+        aborts the build (PLUGIN_ARCHITECTURE.md §20).
+        """
+        from forger.errors import PluginError
+
+        for plugin in self.plugins:
+            if not self._should_apply(plugin):
+                continue
+            method = getattr(plugin, "discover_resources", None)
+            if method is None:
+                continue
+            try:
+                result = method(module_id, context=context)
+            except Exception as e:
+                raise PluginError(
+                    str(e),
+                    plugin_name=plugin.name,
+                    hook="discover_resources",
+                    module_id=module_id,
+                    cause=e,
+                ) from e
+            if result is not None:
+                return result
+        return None
 
     def run_generate(self, context: PluginContext) -> None:
         """Alias for backward compat."""

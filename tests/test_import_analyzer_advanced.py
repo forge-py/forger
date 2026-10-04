@@ -363,3 +363,63 @@ def outer():
     imports = analyzer.analyze_source(source)
     modules = {i.module for i in imports}
     assert modules == {"a", "b", "c"}
+
+
+def test_plugin_resolver_overrides_target() -> None:
+    """A plugin resolver can rewrite a specifier to a virtual module id."""
+    from forger.analyzer.imports import ImportAnalyzer
+
+    captured: list[tuple[str, str | None]] = []
+
+    def resolver(specifier: str, importer: str | None) -> str | None:
+        captured.append((specifier, importer))
+        # Real-world use: plugins map an alias or unusual name to a
+        # generated module id.
+        if specifier == "myconfig":
+            return "forger.generated.config"
+        return None
+
+    src = "from myconfig import settings\n"
+    analyzer = ImportAnalyzer()
+    analyzer.analyze_source(src)
+    targets = analyzer._resolve_targets(
+        analyzer._imports[0],
+        source_module="myapp",
+        plugin_resolver=resolver,
+    )
+    assert targets == ["forger.generated.config"]
+    assert ("myconfig", "myapp") in captured
+
+
+def test_plugin_resolver_exception_falls_through() -> None:
+    """A plugin resolver that raises falls back to string-based resolution."""
+    from forger.analyzer.imports import ImportAnalyzer
+
+    def bad_resolver(specifier: str, importer: str | None) -> str | None:
+        raise RuntimeError("plugin misbehaved")
+
+    src = "import os\n"
+    analyzer = ImportAnalyzer()
+    analyzer.analyze_source(src)
+    targets = analyzer._resolve_targets(
+        analyzer._imports[0],
+        source_module="myapp",
+        plugin_resolver=bad_resolver,
+    )
+    assert targets == ["os"]
+
+
+def test_discover_source_files_sorted(tmp_path: Path) -> None:
+    """Source-file discovery yields a deterministic order."""
+    from forger.compiler import Compiler
+
+    (tmp_path / "z.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "m.py").write_text("x = 1\n", encoding="utf-8")
+    compiler = Compiler(
+        project_root=tmp_path,
+        entry_point="m",
+        output_path=tmp_path / "out.forge",
+    )
+    names = [p.name for p in compiler._discover_source_files()]
+    assert names == sorted(names), f"discovery not sorted: {names}"

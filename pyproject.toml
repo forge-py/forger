@@ -17,7 +17,7 @@ build-backend = "maturin"
 
 [tool.maturin]
 python-source = "src"
-manifest-path = "Cargo.toml"
+manifest-path = "cargo/forger-core/Cargo.toml"
 module-name = "forger.forger_core"
 
 [tool.pytest.ini_options]

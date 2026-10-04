@@ -38,25 +38,64 @@ pub enum ModuleImpl {
     Mixed,
 }
 
+impl ModuleImpl {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ModuleImpl::PurePython => "pure_python",
+            ModuleImpl::BuiltinC => "builtin_c",
+            ModuleImpl::OptionalC => "optional_c",
+            ModuleImpl::Extension => "extension",
+            ModuleImpl::Mixed => "mixed",
+        }
+    }
+}
+
 /// Metadata about a CPython stdlib module.
 #[derive(Debug, Clone)]
+#[pyclass]
 pub struct StdlibModuleInfo {
     /// Fully qualified module name.
+    #[pyo3(get)]
     pub name: String,
     /// Implementation type.
     pub impl_type: ModuleImpl,
     /// C source files required for this module (if C module).
+    #[pyo3(get)]
     pub c_sources: Vec<String>,
     /// Other stdlib modules this module depends on at import time.
+    #[pyo3(get)]
     pub python_deps: Vec<String>,
     /// C modules this module depends on (e.g., `_collections` for `collections`).
+    #[pyo3(get)]
     pub c_deps: Vec<String>,
     /// Whether this module is always built into CPython.
+    #[pyo3(get)]
     pub always_built: bool,
     /// Configure flag that controls this module (e.g., `--enable-unicode`).
+    #[pyo3(get)]
     pub configure_flag: Option<String>,
     /// Description.
+    #[pyo3(get)]
     pub description: String,
+}
+
+#[pymethods]
+impl StdlibModuleInfo {
+    /// Implementation type as a stable string identifier.
+    #[getter]
+    fn impl_type_name(&self) -> String {
+        self.impl_type.as_str().to_string()
+    }
+
+    /// Human-readable representation.
+    fn __repr__(&self) -> String {
+        format!(
+            "<StdlibModuleInfo {} type={} always_built={}>",
+            self.name,
+            self.impl_type.as_str(),
+            self.always_built
+        )
+    }
 }
 
 /// C source file metadata.
@@ -196,6 +235,14 @@ impl CpythonModuleRegistry {
             ("syslog", "Syslog", vec!["Modules/syslogmodule.c"]),
             ("termios", "Terminal I/O", vec!["Modules/termios.c"]),
             ("xxlimited", "Limited API test module", vec!["Modules/xxlimited.c"]),
+            // Heavy optional extensions commonly excluded from minimal builds
+            ("_tkinter", "Tcl/Tk GUI toolkit binding", vec!["_tkinter.c", "Modules/tkappinit.c"]),
+            ("_sqlite3", "SQLite database adapter", vec!["Modules/_sqlite/connection.c", "Modules/_sqlite/cursor.c", "Modules/_sqlite/module.c"]),
+            ("_dbm", "DBM database interface", vec!["Modules/_dbmmodule.c"]),
+            ("_gdbm", "GNU dbm database interface", vec!["Modules/_gdbmmodule.c"]),
+            ("_curses", "Curses terminal handling", vec!["Modules/_cursesmodule.c"]),
+            ("_curses_panel", "Curses panel extension", vec!["Modules/_curses_panel.c"]),
+            ("readline", "GNU readline interface", vec!["Modules/readline.c"]),
         ];
 
         for (name, desc, sources) in builtins {
@@ -688,6 +735,11 @@ impl CpythonModuleRegistry {
         self.python_version
     }
 
+    /// Get metadata for a single module (name, impl type, sources, deps).
+    fn get_module_info(&self, name: &str) -> Option<StdlibModuleInfo> {
+        self.get_module(name).cloned()
+    }
+
     /// Get the total number of known modules.
     fn module_count(&self) -> usize {
         self.modules.len()
@@ -723,18 +775,25 @@ impl CpythonModuleRegistry {
 #[pyclass]
 pub struct CpythonAnalysisResult {
     /// C modules that are required.
+    #[pyo3(get)]
     pub required_c_modules: Vec<String>,
     /// Python modules that are required.
+    #[pyo3(get)]
     pub required_python_modules: Vec<String>,
     /// C source files that are required.
+    #[pyo3(get)]
     pub required_c_sources: Vec<String>,
     /// C modules that can be excluded.
+    #[pyo3(get)]
     pub excluded_c_modules: Vec<String>,
     /// Number of C source files that can be excluded.
+    #[pyo3(get)]
     pub excluded_source_count: usize,
     /// Total number of C source files.
+    #[pyo3(get)]
     pub total_c_sources: usize,
     /// Analysis log for diagnostics.
+    #[pyo3(get)]
     pub analysis_log: Vec<String>,
 }
 

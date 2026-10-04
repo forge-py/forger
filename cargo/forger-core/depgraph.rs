@@ -435,6 +435,14 @@ impl DependencyGraph {
             .collect()
     }
 
+    /// Return every edge from ``src`` to ``dst`` (PHILOSOPHY.md §34).
+    pub fn edges_between(&self, src: &str, dst: &str) -> Vec<&DependencyEdge> {
+        self.outgoing_edges(src)
+            .iter()
+            .filter(|e| e.to == dst)
+            .collect()
+    }
+
     /// Get dependents (reverse dependencies) of a node.
     pub fn dependents_of(&self, node_id: &str) -> Vec<String> {
         self.incoming_edges(node_id)
@@ -733,6 +741,33 @@ impl DependencyGraph {
         DependencyGraph::add_edge(self, edge);
     }
 
+    /// Set the content of a node in place, by ID.
+    ///
+    /// pyo3 getters return clones of nodes, so mutations on fetched node
+    /// objects never persist. This writes through to the stored node.
+    #[pyo3(name = "set_node_content")]
+    fn py_set_node_content(&mut self, node_id: &str, content: String) -> bool {
+        match DependencyGraph::get_node_mut(self, node_id) {
+            Some(node) => {
+                DependencyNode::set_content(node, content);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Mark a node required/unrequired in place, by ID.
+    #[pyo3(name = "set_node_required")]
+    fn py_set_node_required(&mut self, node_id: &str, required: bool) -> bool {
+        match DependencyGraph::get_node_mut(self, node_id) {
+            Some(node) => {
+                node.required = required;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Register an entry point.
     #[pyo3(name = "add_entry_point")]
     fn py_add_entry_point(&mut self, node_id: String) {
@@ -767,6 +802,18 @@ impl DependencyGraph {
     #[pyo3(name = "dependents_of")]
     fn py_dependents_of(&self, node_id: &str) -> Vec<String> {
         DependencyGraph::dependents_of(self, node_id)
+    }
+
+    /// Return every edge from ``src`` to ``dst`` (PHILOSOPHY.md §34).
+    ///
+    /// Used by the compiler's diagnostic to attribute "why was this
+    /// module included?" — without this, the Python fallback's
+    /// private ``_edges_from`` dict is the only way to get the same
+    /// information.
+    #[pyo3(name = "edges_between")]
+    fn py_edges_between(&self, src: &str, dst: &str) -> Vec<DependencyEdge> {
+        DependencyGraph::edges_between(self, src, dst)
+            .into_iter().cloned().collect()
     }
 
     /// Filter nodes by type.
